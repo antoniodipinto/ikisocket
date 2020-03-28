@@ -8,7 +8,7 @@ Based on [Fiber Websocket](https://github.com/gofiber/websocket)
 go get -u github.com/antoniodipinto/ikisocket
 ```
 
-##⚡️ Basic chat example
+## ⚡️ Basic chat example
 
 ```go
 package main
