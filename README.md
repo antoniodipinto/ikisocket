@@ -5,8 +5,6 @@ Based on [Fiber Websocket](https://github.com/gofiber/websocket)
 ### Install
 
 ```
-go get -u github.com/gofiber/fiber
-go get -u github.com/gofiber/websocket
 go get -u github.com/antoniodipinto/ikisocket
 ```
 
