@@ -46,23 +46,30 @@ func main() {
 	app.Get("/ws", ikisocket.New(func(kws *ikisocket.Websocket) {
 		// Retrieve user id from the middleware (optional)
 		userId := fmt.Sprintf("%v", kws.Locals("user_id"))
+
 		// On connect event. Notify when comes a new connection
 		kws.OnConnect = func() {
+
 			// Add the connection to the list of the connected clients
 			// The UUID is generated randomly
 			clients[userId] = kws.UUID
+
 			//Broadcast to all the connected users the newcomer
 			kws.Broadcast([]byte("New user connected: "+userId+" and UUID: "+kws.UUID), true)
+
 			//Write welcome message
 			kws.Emit([]byte("Hello user: " + userId + " and UUID: " + kws.UUID))
 		}
 
 		// On message event
 		kws.OnMessage = func(data []byte) {
+
 			message := MessageObject{}
 			json.Unmarshal(data, &message)
+
 			// Emit the message directly to specified user
 			err := kws.EmitTo(clients[message.To], data)
+
 			if err != nil {
 				fmt.Println(err)
 			}
