@@ -1,6 +1,6 @@
 # 🧬 WebSocket wrapper for [Fiber](https://github.com/gofiber/fiber) with events
 
-Based on [Fiber Websocket](https://github.com/gofiber/websocket)
+### Based on [Fiber Websocket](https://github.com/gofiber/websocket) and inspired by [Socket.io](https://github.com/socketio/socket.io)
 
 ## ⚙️ Installation
 
