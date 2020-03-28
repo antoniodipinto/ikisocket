@@ -32,32 +32,62 @@ const (
 	PongMessage = 10
 )
 
+const (
+	EventMessage = "message"
+
+	EventPing = "ping"
+
+	EventDisconnect = "disconnect"
+
+	EventConnect = "connect"
+
+	EventError = "error"
+)
+
 type Message struct {
 	mType int
 
 	data []byte
 }
 
+type EventPayload struct {
+	Kws Websocket
+
+	Name string
+
+	SocketUUID string
+
+	SocketAttributes map[string]string
+
+	Error error
+
+	Data []byte
+}
+
 type Websocket struct {
 	ws *websocket.Conn
+
+	isAlive bool
+
+	queue []Message
+
+	attributes map[string]string
 
 	UUID string
 
 	Locals func(key string) interface{}
-
-	queue []Message
 
 	OnConnect func()
 
 	OnMessage func(data []byte)
 
 	OnDisconnect func()
-
-	isAlive bool
 }
 
 // Pool with the active connections
 var pool = make(map[string]*Websocket)
+
+var listeners = make(map[string][]func(payload *EventPayload))
 
 func New(callback func(kws *Websocket)) func(*fiber.Ctx) {
 	return websocket.New(func(c *websocket.Conn) {
@@ -67,8 +97,9 @@ func New(callback func(kws *Websocket)) func(*fiber.Ctx) {
 			Locals: func(key string) interface{} {
 				return c.Locals(key)
 			},
-			queue:   nil,
-			isAlive: true,
+			queue:      nil,
+			attributes: make(map[string]string),
+			isAlive:    true,
 		}
 
 		//Generate uuid
@@ -79,12 +110,22 @@ func New(callback func(kws *Websocket)) func(*fiber.Ctx) {
 		callback(kws)
 
 		if kws.OnConnect != nil {
+			kws.fireEvent(EventConnect, nil, nil)
 			kws.OnConnect()
 		}
 
 		kws.run()
 	})
 }
+
+func (kws *Websocket) SetAttribute(key string, attribute string) {
+	kws.attributes[key] = attribute
+}
+
+func (kws *Websocket) GetAttribute(key string) string {
+	return kws.attributes[key]
+}
+
 func (kws *Websocket) EmitTo(uuid string, message []byte) error {
 
 	if !isValidUUID(uuid) {
@@ -92,7 +133,9 @@ func (kws *Websocket) EmitTo(uuid string, message []byte) error {
 	}
 
 	if !pool[uuid].isAlive {
-		return errors.New("message cannot be delivered. Socket disconnected")
+		err := errors.New("message cannot be delivered. Socket disconnected")
+		kws.fireEvent(EventError, nil, err)
+		return err
 	}
 	pool[uuid].Emit(message)
 	return nil
@@ -142,7 +185,7 @@ func (kws *Websocket) run() {
 		for _, message := range kws.queue {
 			err := kws.ws.WriteMessage(message.mType, message.data)
 			if err != nil {
-				kws.disconnected()
+				kws.disconnected(err)
 			}
 		}
 		kws.queue = nil
@@ -155,24 +198,40 @@ func (kws *Websocket) read() {
 		}
 		mtype, msg, err := kws.ws.ReadMessage()
 
-		if mtype == PingMessage || mtype == CloseMessage {
+		if mtype == PingMessage {
+			kws.fireEvent(EventPing, nil, nil)
 			continue
 		}
-		if err != nil {
-			kws.disconnected()
-		} else {
+
+		if mtype == CloseMessage {
+			kws.disconnected(nil)
+			break
+		}
+
+		if err == nil {
+			kws.fireEvent(EventMessage, msg, nil)
+
 			if kws.OnMessage != nil {
 				kws.OnMessage(msg)
 			}
+		} else {
+			kws.disconnected(err)
 		}
 	}
 }
 
 // When the connection closes, disconnected method
 // handle also the OnDisconnect() event
-func (kws *Websocket) disconnected() {
+func (kws *Websocket) disconnected(err error) {
+	kws.fireEvent(EventDisconnect, nil, err)
 	kws.isAlive = false
+
+	// Remove the socket from the pool
 	delete(pool, kws.UUID)
+
+	// Close the connection from the server side
+	kws.ws.Close()
+
 	if kws.OnDisconnect != nil {
 		kws.OnDisconnect()
 	}
@@ -180,7 +239,7 @@ func (kws *Websocket) disconnected() {
 
 func (kws *Websocket) newUUID() string {
 
-	length := 15
+	length := 32
 	seed := rand.New(rand.NewSource(time.Now().UnixNano()))
 	charset := "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz"
 
@@ -189,6 +248,27 @@ func (kws *Websocket) newUUID() string {
 		b[i] = charset[seed.Intn(len(charset))]
 	}
 	return string(b)
+}
+
+func (kws *Websocket) fireEvent(event string, data []byte, error error) {
+	callbacks, ok := listeners[event]
+
+	if ok {
+		for _, callback := range callbacks {
+			callback(&EventPayload{
+				Kws:              *kws,
+				Name:             event,
+				SocketUUID:       kws.UUID,
+				SocketAttributes: kws.attributes,
+				Data:             data,
+				Error:            error,
+			})
+		}
+	}
+}
+
+func On(event string, callback func(payload *EventPayload)) {
+	listeners[event] = append(listeners[event], callback)
 }
 
 func isValidUUID(uuid string) bool {

@@ -2,13 +2,13 @@
 
 Based on [Fiber Websocket](https://github.com/gofiber/websocket)
 
-### Install
+## ⚙️ Installation
 
 ```
 go get -u github.com/antoniodipinto/ikisocket
 ```
 
-### Basic chat example
+##⚡️ Basic chat example
 
 ```go
 package main
@@ -31,57 +31,72 @@ type MessageObject struct {
 func main() {
 
 	// The key for the map is message.to
-	clients := make(map[string]string)
-
-	// Start a new Fiber application
-	app := fiber.New()
-
-	// Setup the middleware to retrieve the data sent in first GET request
-	app.Use(func(c *fiber.Ctx) {
-		c.Locals("user_id", c.Query("user_id"))
-		c.Next()
-	})
-
-	// Websocket route init
-	app.Get("/ws", ikisocket.New(func(kws *ikisocket.Websocket) {
-		// Retrieve user id from the middleware (optional)
-		userId := fmt.Sprintf("%v", kws.Locals("user_id"))
-
-		// On connect event. Notify when comes a new connection
-		kws.OnConnect = func() {
-
-			// Add the connection to the list of the connected clients
-			// The UUID is generated randomly
-			clients[userId] = kws.UUID
-
-			//Broadcast to all the connected users the newcomer
-			kws.Broadcast([]byte("New user connected: "+userId+" and UUID: "+kws.UUID), true)
-
-			//Write welcome message
-			kws.Emit([]byte("Hello user: " + userId + " and UUID: " + kws.UUID))
-		}
-
-		// On message event
-		kws.OnMessage = func(data []byte) {
-
-			message := MessageObject{}
-			json.Unmarshal(data, &message)
-
-			// Emit the message directly to specified user
-			err := kws.EmitTo(clients[message.To], data)
-
-			if err != nil {
-				fmt.Println(err)
-			}
-		}
-
-		kws.OnDisconnect = func() {
-			fmt.Println("User disconnected: " + userId)
-		}
-	}))
-
-	// Start the application on port 3000
-	app.Listen(3000)
+    	clients := make(map[string]string)
+    
+    	// Start a new Fiber application
+    	app := fiber.New()
+    
+    	// Setup the middleware to retrieve the data sent in first GET request
+    	app.Use(func(c *fiber.Ctx) {
+    		c.Locals("user_id", c.Query("user_id"))
+    		c.Next()
+    	})
+    
+    	// Multiple event handling supported
+    	ikisocket.On(ikisocket.EventConnect, func(ep *ikisocket.EventPayload) {
+    		fmt.Println("fired connect 1")
+    	})
+    
+    	ikisocket.On(ikisocket.EventConnect, func(ep *ikisocket.EventPayload) {
+    		fmt.Println("fired connect 2")
+    	})
+    
+    	ikisocket.On(ikisocket.EventMessage, func(ep *ikisocket.EventPayload) {
+    		fmt.Println("fired message: " + string(ep.Data))
+    	})
+    
+    	ikisocket.On(ikisocket.EventDisconnect, func(ep *ikisocket.EventPayload) {
+    		fmt.Println("fired disconnect" + ep.Error.Error())
+    	})
+    
+    	// Websocket route init
+    	app.Get("/ws", ikisocket.New(func(kws *ikisocket.Websocket) {
+    		// Retrieve user id from the middleware (optional)
+    		userId := fmt.Sprintf("%v", kws.Locals("user_id"))
+    
+    		// Every websocket connection has an optional session key => value storage
+    		kws.SetAttribute("user_id", userId)
+    
+    		// On connect event. Notify when comes a new connection
+    		kws.OnConnect = func() {
+    			// Add the connection to the list of the connected clients
+    			// The UUID is generated randomly
+    			clients[userId] = kws.UUID
+    			//Broadcast to all the connected users the newcomer
+    			kws.Broadcast([]byte("New user connected: "+userId+" and UUID: "+kws.UUID), true)
+    			//Write welcome message
+    			kws.Emit([]byte("Hello user: " + userId + " and UUID: " + kws.UUID))
+    		}
+    
+    		// On message event
+    		kws.OnMessage = func(data []byte) {
+    
+    			message := MessageObject{}
+    			json.Unmarshal(data, &message)
+    			// Emit the message directly to specified user
+    			err := kws.EmitTo(clients[message.To], data)
+    			if err != nil {
+    				fmt.Println(err)
+    			}
+    		}
+    	}))
+    
+    	ikisocket.On("close", func(payload *ikisocket.EventPayload) {
+    		fmt.Println("fired close " + payload.SocketAttributes["user_id"])
+    	})
+    
+    	// Start the application on port 3000
+    	app.Listen(3000)
 }
 
 ```
