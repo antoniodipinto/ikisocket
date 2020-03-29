@@ -98,5 +98,9 @@ func main() {
     	// Start the application on port 3000
     	app.Listen(3000)
 }
+```
+### Connect to the websocket
 
+```
+ws://localhost:3000/ws?user_id=54s5f18d1h8d1h8f
 ```
