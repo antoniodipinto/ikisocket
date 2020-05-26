@@ -44,7 +44,7 @@ const (
 	EventError = "error"
 )
 
-type Message struct {
+type message struct {
 	mType int
 
 	data []byte
@@ -69,7 +69,7 @@ type Websocket struct {
 
 	isAlive bool
 
-	queue []Message
+	queue []message
 
 	attributes map[string]string
 
@@ -163,10 +163,10 @@ func (kws *Websocket) pong() {
 	}
 }
 
-func (kws *Websocket) write(messageType int, message []byte) {
-	kws.queue = append(kws.queue, Message{
+func (kws *Websocket) write(messageType int, messageBytes []byte) {
+	kws.queue = append(kws.queue, message{
 		mType: messageType,
-		data:  message,
+		data:  messageBytes,
 	})
 }
 
