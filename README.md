@@ -1,4 +1,7 @@
-# 🧬 WebSocket wrapper for [Fiber](https://github.com/gofiber/fiber) with events
+
+# WebSocket wrapper for [Fiber](https://github.com/gofiber/fiber) with events support
+[![Go Report Card](https://goreportcard.com/badge/github.com/antoniodipinto/ikisocket)](https://goreportcard.com/report/github.com/antoniodipinto/ikisocket)
+[![GoDoc](https://godoc.org/github.com/antoniodipinto/ikisocket?status.svg)](https://godoc.org/github.com/antoniodipinto/ikisocket)
 
 ### Based on [Fiber Websocket](https://github.com/gofiber/websocket) and inspired by [Socket.io](https://github.com/socketio/socket.io)
 
