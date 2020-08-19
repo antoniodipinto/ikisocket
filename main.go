@@ -109,8 +109,10 @@ func New(callback func(kws *Websocket)) func(*fiber.Ctx) {
 
 		callback(kws)
 
+		kws.fireEvent(EventConnect, nil, nil)
+
+		// fire event also via function
 		if kws.OnConnect != nil {
-			kws.fireEvent(EventConnect, nil, nil)
 			kws.OnConnect()
 		}
 
@@ -154,6 +156,10 @@ func (kws *Websocket) Broadcast(message []byte, except bool) {
 
 func (kws *Websocket) Emit(message []byte) {
 	kws.write(TextMessage, message)
+}
+
+func (kws *Websocket) Close() error {
+	return kws.ws.Close()
 }
 
 // pong writes a control message to the client
