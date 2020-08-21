@@ -51,7 +51,7 @@ type message struct {
 }
 
 type EventPayload struct {
-	Kws Websocket
+	Kws *Websocket
 
 	Name string
 
@@ -65,14 +65,15 @@ type EventPayload struct {
 }
 
 type Websocket struct {
+	// The Fiber.Websocket connection
 	ws *websocket.Conn
-
+	// Define if the connection is alive or not
 	isAlive bool
-
+	// Queue of messages sent from the socket
 	queue []message
-
+	// Attributes map collection for the connection
 	attributes map[string]string
-
+	// Unique id of the connection
 	UUID string
 
 	Locals func(key string) interface{}
@@ -87,6 +88,7 @@ type Websocket struct {
 // Pool with the active connections
 var pool = make(map[string]*Websocket)
 
+// List of the listeners for the events
 var listeners = make(map[string][]func(payload *EventPayload))
 
 func New(callback func(kws *Websocket)) func(*fiber.Ctx) {
@@ -105,9 +107,8 @@ func New(callback func(kws *Websocket)) func(*fiber.Ctx) {
 		//Generate uuid
 		kws.UUID = kws.newUUID()
 
+		// register the connection into the pool
 		pool[kws.UUID] = kws
-
-		callback(kws)
 
 		kws.fireEvent(EventConnect, nil, nil)
 
@@ -116,21 +117,35 @@ func New(callback func(kws *Websocket)) func(*fiber.Ctx) {
 			kws.OnConnect()
 		}
 
+		// Run the loop for the given connection
 		kws.run()
+
+		// execute the callback of the socket initialization
+		callback(kws)
 	})
 }
 
+// Set a specific attribute for the specific socket connection
 func (kws *Websocket) SetAttribute(key string, attribute string) {
 	kws.attributes[key] = attribute
 }
 
+// Get a specific attribute from the socket attributes
 func (kws *Websocket) GetAttribute(key string) string {
 	return kws.attributes[key]
 }
 
+// Emit the message to a specific socket uuids list
+func (kws *Websocket) EmitToList(uuids []string, message []byte) {
+	for _, uuid := range uuids {
+		_ = kws.EmitTo(uuid, message)
+	}
+}
+
+// Emit to a specific socket connection
 func (kws *Websocket) EmitTo(uuid string, message []byte) error {
 
-	if !isValidUUID(uuid) {
+	if !connectionExists(uuid) {
 		return errors.New("invalid UUID")
 	}
 
@@ -143,6 +158,8 @@ func (kws *Websocket) EmitTo(uuid string, message []byte) error {
 	return nil
 }
 
+// Broadcast to all the active connections
+// except avoid broadcasting the message to itself
 func (kws *Websocket) Broadcast(message []byte, except bool) {
 
 	for uuid, _ := range pool {
@@ -158,8 +175,9 @@ func (kws *Websocket) Emit(message []byte) {
 	kws.write(TextMessage, message)
 }
 
-func (kws *Websocket) Close() error {
-	return kws.ws.Close()
+func (kws *Websocket) Close() {
+	kws.write(CloseMessage, []byte("Connection closed"))
+	kws.isAlive = false
 }
 
 // pong writes a control message to the client
@@ -181,6 +199,7 @@ func (kws *Websocket) run() {
 	go kws.pong()
 	go kws.read()
 
+	// every millisecond send messages from the queue
 	for range time.Tick(1 * time.Millisecond) {
 		if !kws.isAlive {
 			break
@@ -194,9 +213,13 @@ func (kws *Websocket) run() {
 				kws.disconnected(err)
 			}
 		}
-		kws.queue = nil
+		// Ensure that the queue is empty
+		if len(kws.queue) == 0 {
+			kws.queue = nil
+		}
 	}
 }
+
 func (kws *Websocket) read() {
 	for range time.Tick(10 * time.Millisecond) {
 		if !kws.isAlive {
@@ -214,14 +237,15 @@ func (kws *Websocket) read() {
 			break
 		}
 
-		if err == nil {
-			kws.fireEvent(EventMessage, msg, nil)
-
-			if kws.OnMessage != nil {
-				kws.OnMessage(msg)
-			}
-		} else {
+		if err != nil {
 			kws.disconnected(err)
+			break
+		}
+
+		// We have a message and we fire the message event
+		kws.fireEvent(EventMessage, msg, nil)
+		if kws.OnMessage != nil {
+			kws.OnMessage(msg)
 		}
 	}
 }
@@ -236,8 +260,9 @@ func (kws *Websocket) disconnected(err error) {
 	delete(pool, kws.UUID)
 
 	// Close the connection from the server side
-	kws.ws.Close()
+	_ = kws.ws.Close()
 
+	// fire the specific on disconnect event defined in the initial New callback
 	if kws.OnDisconnect != nil {
 		kws.OnDisconnect()
 	}
@@ -253,7 +278,14 @@ func (kws *Websocket) newUUID() string {
 	for i := range b {
 		b[i] = charset[seed.Intn(len(charset))]
 	}
-	return string(b)
+
+	uuid := string(b)
+
+	//make sure about the uniqueness of the uuid
+	if connectionExists(uuid) {
+		return kws.newUUID()
+	}
+	return uuid
 }
 
 func (kws *Websocket) fireEvent(event string, data []byte, error error) {
@@ -262,7 +294,7 @@ func (kws *Websocket) fireEvent(event string, data []byte, error error) {
 	if ok {
 		for _, callback := range callbacks {
 			callback(&EventPayload{
-				Kws:              *kws,
+				Kws:              kws,
 				Name:             event,
 				SocketUUID:       kws.UUID,
 				SocketAttributes: kws.attributes,
@@ -273,11 +305,12 @@ func (kws *Websocket) fireEvent(event string, data []byte, error error) {
 	}
 }
 
+// Add listener callback for an event into the listeners list
 func On(event string, callback func(payload *EventPayload)) {
 	listeners[event] = append(listeners[event], callback)
 }
 
-func isValidUUID(uuid string) bool {
+func connectionExists(uuid string) bool {
 	_, ok := pool[uuid]
 
 	return ok
