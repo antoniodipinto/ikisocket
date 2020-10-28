@@ -2,10 +2,11 @@ package ikisocket
 
 import (
 	"errors"
-	"github.com/gofiber/fiber"
-	"github.com/gofiber/websocket"
 	"math/rand"
 	"time"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/websocket/v2"
 )
 
 // Source @url:https://github.com/gorilla/websocket/blob/master/conn.go#L61
@@ -91,7 +92,7 @@ var pool = make(map[string]*Websocket)
 // List of the listeners for the events
 var listeners = make(map[string][]func(payload *EventPayload))
 
-func New(callback func(kws *Websocket)) func(*fiber.Ctx) {
+func New(callback func(kws *Websocket)) func(*fiber.Ctx) error {
 	return websocket.New(func(c *websocket.Conn) {
 
 		kws := &Websocket{
