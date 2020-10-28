@@ -20,7 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	ikisocket "github.com/antoniodipinto/ikisocket"
-	"github.com/gofiber/fiber"
+	"github.com/gofiber/fiber/v2"
 )
 
 // Basic chat message object
