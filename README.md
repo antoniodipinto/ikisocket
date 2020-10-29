@@ -1,9 +1,11 @@
 
-# WebSocket wrapper for [Fiber](https://github.com/gofiber/fiber) with events support
+# WebSocket wrapper for [Fiber v2](https://github.com/gofiber/fiber) with events support
 [![Go Report Card](https://goreportcard.com/badge/github.com/antoniodipinto/ikisocket)](https://goreportcard.com/report/github.com/antoniodipinto/ikisocket)
 [![GoDoc](https://godoc.org/github.com/antoniodipinto/ikisocket?status.svg)](https://godoc.org/github.com/antoniodipinto/ikisocket)
 [![GitHub license](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/antoniodipinto/ikisocket/blob/master/LICENSE)
 ### Based on [Fiber Websocket](https://github.com/gofiber/websocket) and inspired by [Socket.io](https://github.com/socketio/socket.io)
+
+### Upgrade to Fiber v2 details [here](https://github.com/antoniodipinto/ikisocket/issues/6) 
 
 ## ⚙️ Installation
 
@@ -19,8 +21,10 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	ikisocket "github.com/antoniodipinto/ikisocket"
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/websocket/v2"
+	"github.com/antoniodipinto/ikisocket"
+	"log"
 )
 
 // Basic chat message object
@@ -30,80 +34,89 @@ type MessageObject struct {
 	To   string `json:"to"`
 }
 
-
 func main() {
 
 	// The key for the map is message.to
-    	clients := make(map[string]string)
-    
-    	// Start a new Fiber application
-    	app := fiber.New()
-    
-    	// Setup the middleware to retrieve the data sent in first GET request
-    	app.Use(func(c *fiber.Ctx) {
-    		c.Locals("user_id", c.Query("user_id"))
-    		c.Next()
-    	})
-    
-    	// Multiple event handling supported
-    	ikisocket.On(ikisocket.EventConnect, func(ep *ikisocket.EventPayload) {
-    		fmt.Println("fired connect 1")
-    	})
-    
-    	ikisocket.On(ikisocket.EventConnect, func(ep *ikisocket.EventPayload) {
-    		fmt.Println("fired connect 2")
-    	})
-    
-    	ikisocket.On(ikisocket.EventMessage, func(ep *ikisocket.EventPayload) {
-    		fmt.Println("fired message: " + string(ep.Data))
-    	})
-    
-    	ikisocket.On(ikisocket.EventDisconnect, func(ep *ikisocket.EventPayload) {
-    		fmt.Println("fired disconnect" + ep.Error.Error())
-    	})
-    
-    	// Websocket route init
-    	app.Get("/ws", ikisocket.New(func(kws *ikisocket.Websocket) {
-    		// Retrieve user id from the middleware (optional)
-    		userId := fmt.Sprintf("%v", kws.Locals("user_id"))
-    
-    		// Every websocket connection has an optional session key => value storage
-    		kws.SetAttribute("user_id", userId)
-    
-    		// On connect event. Notify when comes a new connection
-    		kws.OnConnect = func() {
-    			// Add the connection to the list of the connected clients
-    			// The UUID is generated randomly
-    			clients[userId] = kws.UUID
-    			//Broadcast to all the connected users the newcomer
-    			kws.Broadcast([]byte("New user connected: "+userId+" and UUID: "+kws.UUID), true)
-    			//Write welcome message
-    			kws.Emit([]byte("Hello user: " + userId + " and UUID: " + kws.UUID))
-    		}
-    
-    		// On message event
-    		kws.OnMessage = func(data []byte) {
-    
-    			message := MessageObject{}
-    			json.Unmarshal(data, &message)
-    			// Emit the message directly to specified user
-    			err := kws.EmitTo(clients[message.To], data)
-    			if err != nil {
-    				fmt.Println(err)
-    			}
-    		}
-    	}))
-    
-    	ikisocket.On("close", func(payload *ikisocket.EventPayload) {
-    		fmt.Println("fired close " + payload.SocketAttributes["user_id"])
-    	})
-    
-    	// Start the application on port 3000
-    	app.Listen(3000)
+	clients := make(map[string]string)
+
+	// Start a new Fiber application
+	app := fiber.New()
+
+	// Setup the middleware to retrieve the data sent in first GET request
+	app.Use(func(c *fiber.Ctx) error {
+		// IsWebSocketUpgrade returns true if the client
+		// requested upgrade to the WebSocket protocol.
+		if websocket.IsWebSocketUpgrade(c) {
+			c.Locals("allowed", true)
+			return c.Next()
+		}
+		return fiber.ErrUpgradeRequired
+	})
+
+	// Multiple event handling supported
+	ikisocket.On(ikisocket.EventConnect, func(ep *ikisocket.EventPayload) {
+		fmt.Println(fmt.Sprintf("Connection event 1 - User: %s", ep.SocketAttributes["user_id"]))
+	})
+
+	ikisocket.On(ikisocket.EventConnect, func(ep *ikisocket.EventPayload) {
+		fmt.Println(fmt.Sprintf("Connection event 2 - User: %s", ep.SocketAttributes["user_id"]))
+	})
+
+	// On message event
+	ikisocket.On(ikisocket.EventMessage, func(ep *ikisocket.EventPayload) {
+
+		fmt.Println(fmt.Sprintf("Message event - User: %s - Message: %s", ep.SocketAttributes["user_id"], string(ep.Data)))
+
+		message := MessageObject{}
+
+		err := json.Unmarshal(ep.Data, &message)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		// Emit the message directly to specified user
+		err = ep.Kws.EmitTo(clients[message.To], ep.Data)
+		if err != nil {
+			fmt.Println(err)
+		}
+	})
+
+	// On disconnect event
+	ikisocket.On(ikisocket.EventDisconnect, func(ep *ikisocket.EventPayload) {
+		// Remove the user from the local clients
+		delete(clients, ep.SocketAttributes["user_id"])
+		fmt.Println(fmt.Sprintf("Disconnection event - User: %s", ep.SocketAttributes["user_id"]))
+	})
+
+	// On error event
+	ikisocket.On(ikisocket.EventError, func(ep *ikisocket.EventPayload) {
+		fmt.Println(fmt.Sprintf("Error event - User: %s", ep.SocketAttributes["user_id"]))
+	})
+
+	app.Get("/ws/:id", ikisocket.New(func(kws *ikisocket.Websocket) {
+
+		userId := kws.Params("id")
+
+		// Add the connection to the list of the connected clients
+		// The UUID is generated randomly and is the key that allow
+		// ikisocket to manage Emit/EmitTo/Broadcast
+		clients[userId] = kws.UUID
+
+		// Every websocket connection has an optional session key => value storage
+		kws.SetAttribute("user_id", userId)
+
+		//Broadcast to all the connected users the newcomer
+		kws.Broadcast([]byte(fmt.Sprintf("New user connected: %s and UUID: %s", userId, kws.UUID)), true)
+		//Write welcome message
+		kws.Emit([]byte(fmt.Sprintf("Hello user: %s with UUID: %s", userId, kws.UUID)))
+	}))
+
+	log.Fatal(app.Listen(":3000"))
 }
 ```
 ### Connect to the websocket
 
 ```
-ws://localhost:3000/ws?user_id=54s5f18d1h8d1h8f
+ws://localhost:3000/ws/<user-id>
 ```

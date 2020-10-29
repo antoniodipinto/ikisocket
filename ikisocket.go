@@ -33,6 +33,7 @@ const (
 	PongMessage = 10
 )
 
+// Supported event list
 const (
 	EventMessage = "message"
 
@@ -71,18 +72,31 @@ type Websocket struct {
 	// Define if the connection is alive or not
 	isAlive bool
 	// Queue of messages sent from the socket
-	queue []message
+	queue map[string]message
 	// Attributes map collection for the connection
 	attributes map[string]string
 	// Unique id of the connection
 	UUID string
 
+	// Wrap Fiber Locals function
 	Locals func(key string) interface{}
 
+	// Wrap Fiber Params function
+	Params func(key string, defaultValue ...string) string
+
+	// Wrap Fiber Query function
+	Query func(key string, defaultValue ...string) string
+
+	// Wrap Fiber Cookies function
+	Cookies func(key string, defaultValue ...string) string
+
+	// Deprecated: Old in-callback function
 	OnConnect func()
 
+	// Deprecated: Old in-callback function
 	OnMessage func(data []byte)
 
+	// Deprecated: Old in-callback function
 	OnDisconnect func()
 }
 
@@ -100,16 +114,28 @@ func New(callback func(kws *Websocket)) func(*fiber.Ctx) error {
 			Locals: func(key string) interface{} {
 				return c.Locals(key)
 			},
-			queue:      nil,
+			Params: func(key string, defaultValue ...string) string {
+				return c.Params(key, defaultValue...)
+			},
+			Query: func(key string, defaultValue ...string) string {
+				return c.Query(key, defaultValue...)
+			},
+			Cookies: func(key string, defaultValue ...string) string {
+				return c.Cookies(key, defaultValue...)
+			},
+			queue:      make(map[string]message),
 			attributes: make(map[string]string),
 			isAlive:    true,
 		}
 
 		//Generate uuid
-		kws.UUID = kws.newUUID()
+		kws.UUID = kws.createUUID()
 
 		// register the connection into the pool
 		pool[kws.UUID] = kws
+
+		// execute the callback of the socket initialization
+		callback(kws)
 
 		kws.fireEvent(EventConnect, nil, nil)
 
@@ -117,12 +143,8 @@ func New(callback func(kws *Websocket)) func(*fiber.Ctx) error {
 		if kws.OnConnect != nil {
 			kws.OnConnect()
 		}
-
 		// Run the loop for the given connection
 		kws.run()
-
-		// execute the callback of the socket initialization
-		callback(kws)
 	})
 }
 
@@ -189,10 +211,11 @@ func (kws *Websocket) pong() {
 }
 
 func (kws *Websocket) write(messageType int, messageBytes []byte) {
-	kws.queue = append(kws.queue, message{
+
+	kws.queue[kws.randomUUID()] = message{
 		mType: messageType,
 		data:  messageBytes,
-	})
+	}
 }
 
 func (kws *Websocket) run() {
@@ -208,15 +231,16 @@ func (kws *Websocket) run() {
 		if len(kws.queue) == 0 {
 			continue
 		}
-		for _, message := range kws.queue {
+		for uuid, message := range kws.queue {
+
+			//fmt.Println(fmt.Sprintf("UUID: %s, Type: %s", uuid, message.mType))
+
 			err := kws.ws.WriteMessage(message.mType, message.data)
 			if err != nil {
 				kws.disconnected(err)
 			}
-		}
-		// Ensure that the queue is empty
-		if len(kws.queue) == 0 {
-			kws.queue = nil
+			delete(kws.queue, uuid)
+
 		}
 	}
 }
@@ -248,6 +272,7 @@ func (kws *Websocket) read() {
 		if kws.OnMessage != nil {
 			kws.OnMessage(msg)
 		}
+		continue
 	}
 }
 
@@ -269,9 +294,19 @@ func (kws *Websocket) disconnected(err error) {
 	}
 }
 
-func (kws *Websocket) newUUID() string {
+func (kws *Websocket) createUUID() string {
+	uuid := kws.randomUUID()
 
-	length := 32
+	//make sure about the uniqueness of the uuid
+	if connectionExists(uuid) {
+		return kws.createUUID()
+	}
+	return uuid
+}
+
+func (kws *Websocket) randomUUID() string {
+
+	length := 100
 	seed := rand.New(rand.NewSource(time.Now().UnixNano()))
 	charset := "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz"
 
@@ -280,13 +315,7 @@ func (kws *Websocket) newUUID() string {
 		b[i] = charset[seed.Intn(len(charset))]
 	}
 
-	uuid := string(b)
-
-	//make sure about the uniqueness of the uuid
-	if connectionExists(uuid) {
-		return kws.newUUID()
-	}
-	return uuid
+	return string(b)
 }
 
 func (kws *Websocket) fireEvent(event string, data []byte, error error) {
