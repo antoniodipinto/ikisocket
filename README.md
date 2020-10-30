@@ -7,11 +7,98 @@
 
 ### Upgrade to Fiber v2 details [here](https://github.com/antoniodipinto/ikisocket/issues/6) 
 
+
+
 ## ⚙️ Installation
 
 ```
 go get -u github.com/antoniodipinto/ikisocket
 ```
+
+## 📖 ️ Documentation
+
+```go
+// Initialize new ikisocket in the callback this will
+// execute a callback that expects kws *Websocket Object
+New(callback func(kws *Websocket)) func(*fiber.Ctx) error
+```
+---
+```go
+// Add listener callback for an event into the listeners list
+On(event string, callback func(payload *EventPayload))
+```
+Supported events:
+
+```go
+// Supported event list
+const (
+	// Fired when a Text/Binary message is received
+	EventMessage = "message"
+	// More details here:
+	// @url https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_WebSocket_servers#Pings_and_Pongs_The_Heartbeat_of_WebSockets
+	EventPing = "ping"
+	EventPong = "pong"
+	// Fired on disconnection
+	// The error provided in disconnection event
+	// is defined in RFC 6455, section 11.7.
+	// @url https://github.com/gofiber/websocket/blob/cd4720c435de415b864d975a9ca23a47eaf081ef/websocket.go#L192
+	EventDisconnect = "disconnect"
+	// Fired on first connection
+	EventConnect = "connect"
+	// Fired when the connection is actively closed from the server
+	EventClose = "close"
+	// Fired when some error appears useful also for debugging websockets
+	EventError = "error"
+)
+```
+
+```go
+// Set a specific attribute for the specific socket connection
+func (kws *Websocket) SetAttribute(key string, attribute string)
+```
+---
+
+
+```go
+// Get a specific attribute from the socket attributes
+func (kws *Websocket) GetAttribute(key string) string
+```
+---
+
+
+```go
+// Emit the message to a specific socket uuids list
+func (kws *Websocket) EmitToList(uuids []string, message []byte) 
+```
+---
+
+```go
+// Emit to a specific socket connection
+func (kws *Websocket) EmitTo(uuid string, message []byte) error
+```
+---
+
+
+```go
+// Broadcast to all the active connections
+// except avoid broadcasting the message to itself
+func (kws *Websocket) Broadcast(message []byte, except bool
+```
+---
+
+
+```go
+// Emit/Write the message into the given connection
+func (kws *Websocket) Emit(message []byte)
+```
+---
+
+
+```go
+// Actively close the connection from the server
+func (kws *Websocket) Close() 
+```
+---
 
 ## ⚡️ Basic chat example
 
@@ -69,6 +156,12 @@ func main() {
 
 		message := MessageObject{}
 
+		// Unmarshal the json message
+		// {
+		//  "from": "<user-id>",
+		//  "to": "<recipient-user-id>",
+		//  "data": "hello"
+		//}
 		err := json.Unmarshal(ep.Data, &message)
 		if err != nil {
 			fmt.Println(err)
@@ -89,13 +182,22 @@ func main() {
 		fmt.Println(fmt.Sprintf("Disconnection event - User: %s", ep.SocketAttributes["user_id"]))
 	})
 
+	// On close event
+	// This event is called when the server disconnects the user actively with .Close() method
+	ikisocket.On(ikisocket.EventClose, func(ep *ikisocket.EventPayload) {
+		// Remove the user from the local clients
+		delete(clients, ep.SocketAttributes["user_id"])
+		fmt.Println(fmt.Sprintf("Close event - User: %s", ep.SocketAttributes["user_id"]))
+	})
+
 	// On error event
 	ikisocket.On(ikisocket.EventError, func(ep *ikisocket.EventPayload) {
 		fmt.Println(fmt.Sprintf("Error event - User: %s", ep.SocketAttributes["user_id"]))
 	})
 
 	app.Get("/ws/:id", ikisocket.New(func(kws *ikisocket.Websocket) {
-
+		
+		// Retrieve the user id from endpoint
 		userId := kws.Params("id")
 
 		// Add the connection to the list of the connected clients
@@ -120,3 +222,19 @@ func main() {
 ```
 ws://localhost:3000/ws/<user-id>
 ```
+### Message object example
+
+```
+{
+  "from": "<user-id>",
+  "to": "<recipient-user-id>",
+  "data": "hello"
+}
+```
+
+
+
+
+
+
+

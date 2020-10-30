@@ -15,19 +15,15 @@ const (
 	// TextMessage denotes a text data message. The text message payload is
 	// interpreted as UTF-8 encoded text data.
 	TextMessage = 1
-
 	// BinaryMessage denotes a binary data message.
 	BinaryMessage = 2
-
 	// CloseMessage denotes a close control message. The optional message
 	// payload contains a numeric code and text. Use the FormatCloseMessage
 	// function to format a close message payload.
 	CloseMessage = 8
-
 	// PingMessage denotes a ping control message. The optional message payload
 	// is UTF-8 encoded text.
 	PingMessage = 9
-
 	// PongMessage denotes a pong control message. The optional message payload
 	// is UTF-8 encoded text.
 	PongMessage = 10
@@ -35,34 +31,56 @@ const (
 
 // Supported event list
 const (
+	// Fired when a Text/Binary message is received
 	EventMessage = "message"
-
+	// More details here:
+	// @url https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_WebSocket_servers#Pings_and_Pongs_The_Heartbeat_of_WebSockets
 	EventPing = "ping"
-
+	EventPong = "pong"
+	// Fired on disconnection
+	// The error provided in disconnection event
+	// is defined in RFC 6455, section 11.7.
+	// @url https://github.com/gofiber/websocket/blob/cd4720c435de415b864d975a9ca23a47eaf081ef/websocket.go#L192
 	EventDisconnect = "disconnect"
-
+	// Fired on first connection
 	EventConnect = "connect"
-
+	// Fired when the connection is actively closed from the server
+	EventClose = "close"
+	// Fired when some error appears useful also for debugging websockets
 	EventError = "error"
 )
 
-type message struct {
-	mType int
+var (
+	// The addressed ws connection is not available anymore
+	// error data is the uuid of that connection
+	ErrorInvalidConnection = errors.New("message cannot be delivered invalid/gone connection")
+)
 
+// Raw form of websocket message
+type message struct {
+	// Message type
+	mType int
+	// Message data
 	data []byte
 }
 
+// Event Payload is the object that
+// stores all the information about the event and
+// the connection
 type EventPayload struct {
+	// The connection object
 	Kws *Websocket
-
+	// The name of the event
 	Name string
-
+	// Unique connection UUID
 	SocketUUID string
-
+	// Optional websocket attributes
 	SocketAttributes map[string]string
-
+	// Optional error when are fired events like
+	// - Disconnect
+	// - Error
 	Error error
-
+	// Data is used on Message and on Error event
 	Data []byte
 }
 
@@ -77,25 +95,18 @@ type Websocket struct {
 	attributes map[string]string
 	// Unique id of the connection
 	UUID string
-
 	// Wrap Fiber Locals function
 	Locals func(key string) interface{}
-
 	// Wrap Fiber Params function
 	Params func(key string, defaultValue ...string) string
-
 	// Wrap Fiber Query function
 	Query func(key string, defaultValue ...string) string
-
 	// Wrap Fiber Cookies function
 	Cookies func(key string, defaultValue ...string) string
-
 	// Deprecated: Old in-callback function
 	OnConnect func()
-
 	// Deprecated: Old in-callback function
 	OnMessage func(data []byte)
-
 	// Deprecated: Old in-callback function
 	OnDisconnect func()
 }
@@ -161,7 +172,10 @@ func (kws *Websocket) GetAttribute(key string) string {
 // Emit the message to a specific socket uuids list
 func (kws *Websocket) EmitToList(uuids []string, message []byte) {
 	for _, uuid := range uuids {
-		_ = kws.EmitTo(uuid, message)
+		err := kws.EmitTo(uuid, message)
+		if err != nil {
+			kws.fireEvent(EventError, message, err)
+		}
 	}
 }
 
@@ -169,13 +183,13 @@ func (kws *Websocket) EmitToList(uuids []string, message []byte) {
 func (kws *Websocket) EmitTo(uuid string, message []byte) error {
 
 	if !connectionExists(uuid) {
-		return errors.New("invalid UUID")
+		kws.fireEvent(EventError, []byte(uuid), ErrorInvalidConnection)
+		return ErrorInvalidConnection
 	}
 
 	if !pool[uuid].isAlive {
-		err := errors.New("message cannot be delivered. Socket disconnected")
-		kws.fireEvent(EventError, nil, err)
-		return err
+		kws.fireEvent(EventError, []byte(uuid), ErrorInvalidConnection)
+		return ErrorInvalidConnection
 	}
 	pool[uuid].Emit(message)
 	return nil
@@ -189,17 +203,22 @@ func (kws *Websocket) Broadcast(message []byte, except bool) {
 		if except && kws.UUID == uuid {
 			continue
 		}
-
-		kws.EmitTo(uuid, message)
+		err := kws.EmitTo(uuid, message)
+		if err != nil {
+			kws.fireEvent(EventError, message, err)
+		}
 	}
 }
 
+// Emit/Write the message into the given connection
 func (kws *Websocket) Emit(message []byte) {
 	kws.write(TextMessage, message)
 }
 
+// Actively close the connection from the server
 func (kws *Websocket) Close() {
 	kws.write(CloseMessage, []byte("Connection closed"))
+	kws.fireEvent(EventClose, nil, nil)
 	kws.isAlive = false
 }
 
@@ -210,14 +229,15 @@ func (kws *Websocket) pong() {
 	}
 }
 
+// Add in message queue
 func (kws *Websocket) write(messageType int, messageBytes []byte) {
-
 	kws.queue[kws.randomUUID()] = message{
 		mType: messageType,
 		data:  messageBytes,
 	}
 }
 
+// Start Pong/Read/Write functions
 func (kws *Websocket) run() {
 
 	go kws.pong()
@@ -233,18 +253,17 @@ func (kws *Websocket) run() {
 		}
 		for uuid, message := range kws.queue {
 
-			//fmt.Println(fmt.Sprintf("UUID: %s, Type: %s", uuid, message.mType))
-
 			err := kws.ws.WriteMessage(message.mType, message.data)
 			if err != nil {
 				kws.disconnected(err)
 			}
 			delete(kws.queue, uuid)
-
 		}
 	}
 }
 
+// Listen for incoming messages
+// and filter by message type
 func (kws *Websocket) read() {
 	for range time.Tick(10 * time.Millisecond) {
 		if !kws.isAlive {
@@ -254,6 +273,11 @@ func (kws *Websocket) read() {
 
 		if mtype == PingMessage {
 			kws.fireEvent(EventPing, nil, nil)
+			continue
+		}
+
+		if mtype == PongMessage {
+			kws.fireEvent(EventPong, nil, nil)
 			continue
 		}
 
@@ -285,6 +309,12 @@ func (kws *Websocket) disconnected(err error) {
 	// Remove the socket from the pool
 	delete(pool, kws.UUID)
 
+	// Fire error event if the connection is
+	// disconnected by an error
+	if err != nil {
+		kws.fireEvent(EventError, nil, err)
+	}
+
 	// Close the connection from the server side
 	_ = kws.ws.Close()
 
@@ -294,6 +324,7 @@ func (kws *Websocket) disconnected(err error) {
 	}
 }
 
+// Create random UUID for each connection
 func (kws *Websocket) createUUID() string {
 	uuid := kws.randomUUID()
 
@@ -318,6 +349,8 @@ func (kws *Websocket) randomUUID() string {
 	return string(b)
 }
 
+// Checks if there is at least a listener for a given event
+// and loop over the callbacks registered
 func (kws *Websocket) fireEvent(event string, data []byte, error error) {
 	callbacks, ok := listeners[event]
 
