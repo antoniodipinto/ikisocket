@@ -306,9 +306,6 @@ func (kws *Websocket) disconnected(err error) {
 	kws.fireEvent(EventDisconnect, nil, err)
 	kws.isAlive = false
 
-	// Remove the socket from the pool
-	delete(pool, kws.UUID)
-
 	// Fire error event if the connection is
 	// disconnected by an error
 	if err != nil {
@@ -322,6 +319,9 @@ func (kws *Websocket) disconnected(err error) {
 	if kws.OnDisconnect != nil {
 		kws.OnDisconnect()
 	}
+
+	// Remove the socket from the pool
+	delete(pool, kws.UUID)
 }
 
 // Create random UUID for each connection

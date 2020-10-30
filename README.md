@@ -51,6 +51,30 @@ const (
 	EventError = "error"
 )
 ```
+Event Payload object
+```go
+// Event Payload is the object that
+// stores all the information about the event and
+// the connection
+type EventPayload struct {
+	// The connection object
+	Kws *Websocket
+	// The name of the event
+	Name string
+	// Unique connection UUID
+	SocketUUID string
+	// Optional websocket attributes
+	SocketAttributes map[string]string
+	// Optional error when are fired events like
+	// - Disconnect
+	// - Error
+	Error error
+	// Data is used on Message and on Error event
+	Data []byte
+}
+```
+---
+
 
 ```go
 // Set a specific attribute for the specific socket connection
@@ -82,7 +106,7 @@ func (kws *Websocket) EmitTo(uuid string, message []byte) error
 ```go
 // Broadcast to all the active connections
 // except avoid broadcasting the message to itself
-func (kws *Websocket) Broadcast(message []byte, except bool
+func (kws *Websocket) Broadcast(message []byte, except bool)
 ```
 ---
 
