@@ -8,6 +8,14 @@
 ### Upgrade to Fiber v2 details [here](https://github.com/antoniodipinto/ikisocket/issues/6) 
 
 
+## Any bug?
+Create ad issue following [this](https://github.com/antoniodipinto/ikisocket/blob/master/.github/ISSUE_TEMPLATE/bug_report.md) template
+
+
+## Feature request?
+Create ad issue following [this](https://github.com/antoniodipinto/ikisocket/blob/master/.github/ISSUE_TEMPLATE/feature_request.md) template
+
+
 
 ## ⚙️ Installation
 
