@@ -23,7 +23,7 @@ Create ad issue following [this](https://github.com/antoniodipinto/ikisocket/blo
 go get -u github.com/antoniodipinto/ikisocket
 ```
 
-## 📖 ️ Documentation
+## 📖 ️ [Documentation](https://pkg.go.dev/github.com/antoniodipinto/ikisocket#section-documentation)
 
 ```go
 // Initialize new ikisocket in the callback this will
