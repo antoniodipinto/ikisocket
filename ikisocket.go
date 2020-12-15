@@ -313,7 +313,13 @@ func (kws *Websocket) disconnected(err error) {
 	}
 
 	// Close the connection from the server side
-	_ = kws.ws.Close()
+	if kws.ws.Conn != nil {
+		err = kws.ws.Close()
+
+		if err != nil {
+			kws.fireEvent(EventError, nil, err)
+		}
+	}
 
 	// fire the specific on disconnect event defined in the initial New callback
 	if kws.OnDisconnect != nil {
