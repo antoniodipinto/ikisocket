@@ -103,12 +103,6 @@ type Websocket struct {
 	Query func(key string, defaultValue ...string) string
 	// Wrap Fiber Cookies function
 	Cookies func(key string, defaultValue ...string) string
-	// Deprecated: Old in-callback function
-	OnConnect func()
-	// Deprecated: Old in-callback function
-	OnMessage func(data []byte)
-	// Deprecated: Old in-callback function
-	OnDisconnect func()
 }
 
 // Pool with the active connections
@@ -150,10 +144,6 @@ func New(callback func(kws *Websocket)) func(*fiber.Ctx) error {
 
 		kws.fireEvent(EventConnect, nil, nil)
 
-		// fire event also via function
-		if kws.OnConnect != nil {
-			kws.OnConnect()
-		}
 		// Run the loop for the given connection
 		kws.run()
 	})
@@ -293,15 +283,11 @@ func (kws *Websocket) read() {
 
 		// We have a message and we fire the message event
 		kws.fireEvent(EventMessage, msg, nil)
-		if kws.OnMessage != nil {
-			kws.OnMessage(msg)
-		}
 		continue
 	}
 }
 
 // When the connection closes, disconnected method
-// handle also the OnDisconnect() event
 func (kws *Websocket) disconnected(err error) {
 	kws.fireEvent(EventDisconnect, nil, err)
 	kws.isAlive = false
@@ -319,11 +305,6 @@ func (kws *Websocket) disconnected(err error) {
 		if err != nil {
 			kws.fireEvent(EventError, nil, err)
 		}
-	}
-
-	// fire the specific on disconnect event defined in the initial New callback
-	if kws.OnDisconnect != nil {
-		kws.OnDisconnect()
 	}
 
 	// Remove the socket from the pool
