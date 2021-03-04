@@ -118,6 +118,11 @@ func (kws *Websocket) Broadcast(message []byte, except bool)
 ```
 ---
 
+```go
+// Fire custom event
+func (kws *Websocket) Fire(event string, data []byte)
+```
+---
 
 ```go
 // Emit/Write the message into the given connection

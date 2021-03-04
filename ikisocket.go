@@ -188,7 +188,6 @@ func (kws *Websocket) EmitTo(uuid string, message []byte) error {
 // Broadcast to all the active connections
 // except avoid broadcasting the message to itself
 func (kws *Websocket) Broadcast(message []byte, except bool) {
-
 	for uuid, _ := range pool {
 		if except && kws.UUID == uuid {
 			continue
@@ -198,6 +197,11 @@ func (kws *Websocket) Broadcast(message []byte, except bool) {
 			kws.fireEvent(EventError, message, err)
 		}
 	}
+}
+
+// Fire custom event
+func (kws *Websocket) Fire(event string, data []byte) {
+	kws.fireEvent(event, data, nil)
 }
 
 // Emit/Write the message into the given connection
