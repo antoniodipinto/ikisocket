@@ -84,6 +84,26 @@ type EventPayload struct {
 	Data []byte
 }
 
+type ws interface {
+	IsAlive() bool
+	SetAttribute(key string, attribute string)
+	GetAttribute(key string) string
+	EmitToList(uuids []string, message []byte)
+	EmitTo(uuid string, message []byte) error
+	Broadcast(message []byte, except bool)
+	Fire(event string, data []byte)
+	Emit(message []byte)
+	Close()
+	pong()
+	write(messageType int, messageBytes []byte)
+	run()
+	read()
+	disconnected(err error)
+	createUUID() string
+	randomUUID() string
+	fireEvent(event string, data []byte, error error)
+}
+
 type Websocket struct {
 	// The Fiber.Websocket connection
 	ws *websocket.Conn
@@ -106,7 +126,7 @@ type Websocket struct {
 }
 
 // Pool with the active connections
-var pool = make(map[string]*Websocket)
+var pool = make(map[string]ws)
 
 // List of the listeners for the events
 var listeners = make(map[string][]func(payload *EventPayload))
@@ -169,6 +189,14 @@ func (kws *Websocket) EmitToList(uuids []string, message []byte) {
 	}
 }
 
+// Emit the message to a specific socket uuids list
+// Ignores all errors
+func EmitToList(uuids []string, message []byte) {
+	for _, uuid := range uuids {
+		_ = EmitTo(uuid, message)
+	}
+}
+
 // Emit to a specific socket connection
 func (kws *Websocket) EmitTo(uuid string, message []byte) error {
 
@@ -177,8 +205,21 @@ func (kws *Websocket) EmitTo(uuid string, message []byte) error {
 		return ErrorInvalidConnection
 	}
 
-	if !pool[uuid].isAlive {
+	if !pool[uuid].IsAlive() {
 		kws.fireEvent(EventError, []byte(uuid), ErrorInvalidConnection)
+		return ErrorInvalidConnection
+	}
+	pool[uuid].Emit(message)
+	return nil
+}
+
+// Emit to a specific socket connection
+func EmitTo(uuid string, message []byte) error {
+	if !connectionExists(uuid) {
+		return ErrorInvalidConnection
+	}
+
+	if !pool[uuid].IsAlive() {
 		return ErrorInvalidConnection
 	}
 	pool[uuid].Emit(message)
@@ -199,9 +240,21 @@ func (kws *Websocket) Broadcast(message []byte, except bool) {
 	}
 }
 
+// Broadcast to all the active connections
+func Broadcast(message []byte) {
+	for _, kws := range pool {
+		kws.Emit(message)
+	}
+}
+
 // Fire custom event
 func (kws *Websocket) Fire(event string, data []byte) {
 	kws.fireEvent(event, data, nil)
+}
+
+// Fire custom event on all connections
+func Fire(event string, data []byte) {
+	fireGlobalEvent(event, data, nil)
 }
 
 // Emit/Write the message into the given connection
@@ -214,6 +267,10 @@ func (kws *Websocket) Close() {
 	kws.write(CloseMessage, []byte("Connection closed"))
 	kws.fireEvent(EventClose, nil, nil)
 	kws.isAlive = false
+}
+
+func (kws *Websocket) IsAlive() bool {
+	return kws.isAlive
 }
 
 // pong writes a control message to the client
@@ -338,6 +395,13 @@ func (kws *Websocket) randomUUID() string {
 	}
 
 	return string(b)
+}
+
+// Fires event on all connections.
+func fireGlobalEvent(event string, data []byte, error error) {
+	for _, kws := range pool {
+		kws.fireEvent(event, data, error)
+	}
 }
 
 // Checks if there is at least a listener for a given event
