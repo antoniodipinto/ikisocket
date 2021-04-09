@@ -55,6 +55,8 @@ var (
 	// The addressed ws connection is not available anymore
 	// error data is the uuid of that connection
 	ErrorInvalidConnection = errors.New("message cannot be delivered invalid/gone connection")
+	// The UUID already exists in the pool
+	ErrorUUIDDuplication = errors.New("message cannot be delivered invalid/gone connection")
 )
 
 // Raw form of websocket message
@@ -130,6 +132,7 @@ type Websocket struct {
 
 type safePool struct {
 	sync.RWMutex
+	// List of the connections alive
 	conn map[string]ws
 }
 
@@ -259,8 +262,12 @@ func (kws *Websocket) GetUUID() string {
 
 func (kws *Websocket) SetUUID(uuid string) {
 	kws.Lock()
+	defer kws.Unlock()
+
+	if pool.contains(uuid) {
+		panic(ErrorUUIDDuplication)
+	}
 	kws.UUID = uuid
-	kws.Unlock()
 }
 
 // Set a specific attribute for the specific socket connection
@@ -298,7 +305,7 @@ func EmitToList(uuids []string, message []byte) {
 // Emit to a specific socket connection
 func (kws *Websocket) EmitTo(uuid string, message []byte) error {
 
-	if !connectionExists(uuid) {
+	if !pool.contains(uuid) {
 		kws.fireEvent(EventError, []byte(uuid), ErrorInvalidConnection)
 		return ErrorInvalidConnection
 	}
@@ -313,7 +320,7 @@ func (kws *Websocket) EmitTo(uuid string, message []byte) error {
 
 // Emit to a specific socket connection
 func EmitTo(uuid string, message []byte) error {
-	if !connectionExists(uuid) {
+	if !pool.contains(uuid) {
 		return ErrorInvalidConnection
 	}
 
@@ -327,7 +334,7 @@ func EmitTo(uuid string, message []byte) error {
 // Broadcast to all the active connections
 // except avoid broadcasting the message to itself
 func (kws *Websocket) Broadcast(message []byte, except bool) {
-	for uuid, _ := range pool.all() {
+	for uuid := range pool.all() {
 		if except && kws.UUID == uuid {
 			continue
 		}
@@ -487,7 +494,7 @@ func (kws *Websocket) createUUID() string {
 	uuid := kws.randomUUID()
 
 	//make sure about the uniqueness of the uuid
-	if connectionExists(uuid) {
+	if pool.contains(uuid) {
 		return kws.createUUID()
 	}
 	return uuid
@@ -536,8 +543,4 @@ type EventCallback func(payload *EventPayload)
 // Add listener callback for an event into the listeners list
 func On(event string, callback EventCallback) {
 	listeners.set(event, callback)
-}
-
-func connectionExists(uuid string) bool {
-	return pool.contains(uuid)
 }
