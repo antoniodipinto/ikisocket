@@ -3,6 +3,7 @@ package ikisocket
 import (
 	"errors"
 	"math/rand"
+	"sync"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -86,6 +87,7 @@ type EventPayload struct {
 
 type ws interface {
 	IsAlive() bool
+	GetUUID() string
 	SetAttribute(key string, attribute string)
 	GetAttribute(key string) string
 	EmitToList(uuids []string, message []byte)
@@ -125,11 +127,90 @@ type Websocket struct {
 	Cookies func(key string, defaultValue ...string) string
 }
 
+type safePool struct {
+	sync.RWMutex
+	conn map[string]ws
+}
+
 // Pool with the active connections
-var pool = make(map[string]ws)
+var pool = safePool{
+	conn: make(map[string]ws),
+}
+
+func (p *safePool) set(ws ws) {
+	p.Lock()
+	p.conn[ws.GetUUID()] = ws
+	p.Unlock()
+}
+
+func (p *safePool) all() map[string]ws {
+	p.RLock()
+	ret := make(map[string]ws, 0)
+	for uuid, kws := range p.conn {
+		ret[uuid] = kws
+	}
+	p.RUnlock()
+	return ret
+}
+
+func (p *safePool) get(key string) ws {
+	p.RLock()
+	ret, ok := p.conn[key]
+	p.RUnlock()
+	if !ok {
+		panic("not found")
+	}
+	return ret
+}
+
+func (p *safePool) contains(key string) bool {
+	p.RLock()
+	_, ok := p.conn[key]
+	p.RUnlock()
+	return ok
+}
+
+func (p *safePool) delete(key string) {
+	p.Lock()
+	delete(p.conn, key)
+	p.Unlock()
+}
+
+func (p *safePool) reset() {
+	p.Lock()
+	p.conn = make(map[string]ws)
+	p.Unlock()
+}
+
+type safeListeners struct {
+	sync.RWMutex
+	list map[string][]EventCallback
+}
+
+func (l *safeListeners) set(event string, callback EventCallback) {
+	l.Lock()
+	listeners.list[event] = append(listeners.list[event], callback)
+	l.Unlock()
+}
+
+func (l *safeListeners) get(event string) []EventCallback {
+	if _, ok := l.list[event]; !ok {
+		return make([]EventCallback, 0)
+	}
+
+	l.RLock()
+	ret := make([]EventCallback, 0)
+	for _, v := range l.list[event] {
+		ret = append(ret, v)
+	}
+	l.RUnlock()
+	return ret
+}
 
 // List of the listeners for the events
-var listeners = make(map[string][]func(payload *EventPayload))
+var listeners = safeListeners{
+	list: make(map[string][]EventCallback),
+}
 
 func New(callback func(kws *Websocket)) func(*fiber.Ctx) error {
 	return websocket.New(func(c *websocket.Conn) {
@@ -153,11 +234,11 @@ func New(callback func(kws *Websocket)) func(*fiber.Ctx) error {
 			isAlive:    true,
 		}
 
-		//Generate uuid
+		// Generate uuid
 		kws.UUID = kws.createUUID()
 
 		// register the connection into the pool
-		pool[kws.UUID] = kws
+		pool.set(kws)
 
 		// execute the callback of the socket initialization
 		callback(kws)
@@ -167,6 +248,10 @@ func New(callback func(kws *Websocket)) func(*fiber.Ctx) error {
 		// Run the loop for the given connection
 		kws.run()
 	})
+}
+
+func (kws *Websocket) GetUUID() string {
+	return kws.UUID
 }
 
 // Set a specific attribute for the specific socket connection
@@ -205,11 +290,11 @@ func (kws *Websocket) EmitTo(uuid string, message []byte) error {
 		return ErrorInvalidConnection
 	}
 
-	if !pool[uuid].IsAlive() {
+	if !pool.get(uuid).IsAlive() {
 		kws.fireEvent(EventError, []byte(uuid), ErrorInvalidConnection)
 		return ErrorInvalidConnection
 	}
-	pool[uuid].Emit(message)
+	pool.get(uuid).Emit(message)
 	return nil
 }
 
@@ -219,17 +304,17 @@ func EmitTo(uuid string, message []byte) error {
 		return ErrorInvalidConnection
 	}
 
-	if !pool[uuid].IsAlive() {
+	if !pool.get(uuid).IsAlive() {
 		return ErrorInvalidConnection
 	}
-	pool[uuid].Emit(message)
+	pool.get(uuid).Emit(message)
 	return nil
 }
 
 // Broadcast to all the active connections
 // except avoid broadcasting the message to itself
 func (kws *Websocket) Broadcast(message []byte, except bool) {
-	for uuid, _ := range pool {
+	for uuid, _ := range pool.all() {
 		if except && kws.UUID == uuid {
 			continue
 		}
@@ -242,7 +327,7 @@ func (kws *Websocket) Broadcast(message []byte, except bool) {
 
 // Broadcast to all the active connections
 func Broadcast(message []byte) {
-	for _, kws := range pool {
+	for _, kws := range pool.all() {
 		kws.Emit(message)
 	}
 }
@@ -369,7 +454,7 @@ func (kws *Websocket) disconnected(err error) {
 	}
 
 	// Remove the socket from the pool
-	delete(pool, kws.UUID)
+	pool.delete(kws.UUID)
 }
 
 // Create random UUID for each connection
@@ -399,7 +484,7 @@ func (kws *Websocket) randomUUID() string {
 
 // Fires event on all connections.
 func fireGlobalEvent(event string, data []byte, error error) {
-	for _, kws := range pool {
+	for _, kws := range pool.all() {
 		kws.fireEvent(event, data, error)
 	}
 }
@@ -407,29 +492,27 @@ func fireGlobalEvent(event string, data []byte, error error) {
 // Checks if there is at least a listener for a given event
 // and loop over the callbacks registered
 func (kws *Websocket) fireEvent(event string, data []byte, error error) {
-	callbacks, ok := listeners[event]
+	callbacks := listeners.get(event)
 
-	if ok {
-		for _, callback := range callbacks {
-			callback(&EventPayload{
-				Kws:              kws,
-				Name:             event,
-				SocketUUID:       kws.UUID,
-				SocketAttributes: kws.attributes,
-				Data:             data,
-				Error:            error,
-			})
-		}
+	for _, callback := range callbacks {
+		callback(&EventPayload{
+			Kws:              kws,
+			Name:             event,
+			SocketUUID:       kws.UUID,
+			SocketAttributes: kws.attributes,
+			Data:             data,
+			Error:            error,
+		})
 	}
 }
 
+type EventCallback func(payload *EventPayload)
+
 // Add listener callback for an event into the listeners list
-func On(event string, callback func(payload *EventPayload)) {
-	listeners[event] = append(listeners[event], callback)
+func On(event string, callback EventCallback) {
+	listeners.set(event, callback)
 }
 
 func connectionExists(uuid string) bool {
-	_, ok := pool[uuid]
-
-	return ok
+	return pool.contains(uuid)
 }

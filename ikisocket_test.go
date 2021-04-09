@@ -1,14 +1,17 @@
 package ikisocket
 
 import (
+	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/websocket/v2"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"net/http/httptest"
 	"sync"
 	"testing"
 )
 
 const numTestConn = 10
+const numParallelTestConn = 50_000
 
 type HandlerMock struct {
 	mock.Mock
@@ -44,13 +47,36 @@ func (s *WebsocketMock) IsAlive() bool {
 	return args.Bool(0)
 }
 
+func (s *WebsocketMock) GetUUID() string {
+	return s.UUID
+}
+
+func TestParallelConnections(t *testing.T) {
+	app := fiber.New()
+
+	app.Use(upgradeMiddleware)
+
+	app.Get("/", New(func(kws *Websocket) {}))
+
+	req := httptest.NewRequest(fiber.MethodGet, "/", nil)
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Upgrade", "Websocket")
+	req.Header.Set("Sec-WebSocket-Key", "veQ+5bJcQAhyLAn+SnM5YA==")
+	req.Header.Set("Sec-WebSocket-Version", "13")
+	for i := 0; i < numParallelTestConn; i++ {
+		resp, err := app.Test(req, -1)
+		require.Nil(t, err)
+		require.Equal(t, fiber.StatusSwitchingProtocols, resp.StatusCode)
+	}
+}
+
 func TestGlobalFire(t *testing.T) {
-	reset()
+	pool.reset()
 
 	// simulate connections
 	for i := 0; i < numTestConn; i++ {
 		kws := createWS()
-		pool[kws.UUID] = kws
+		pool.set(kws)
 	}
 
 	h := new(HandlerMock)
@@ -71,11 +97,11 @@ func TestGlobalFire(t *testing.T) {
 }
 
 func TestGlobalBroadcast(t *testing.T) {
-	reset()
+	pool.reset()
 
 	mws := new(WebsocketMock)
 	mws.UUID = "80a80sdf809dsf"
-	pool[mws.UUID] = mws
+	pool.set(mws)
 
 	// setup expectations
 	mws.On("Emit", mock.Anything).Return(nil)
@@ -91,18 +117,18 @@ func TestGlobalBroadcast(t *testing.T) {
 }
 
 func TestGlobalEmitTo(t *testing.T) {
-	reset()
+	pool.reset()
 
 	aliveUUID := "80a80sdf809dsf"
 	closedUUID := "las3dfj09808"
 
 	alive := new(WebsocketMock)
 	alive.UUID = aliveUUID
-	pool[alive.UUID] = alive
+	pool.set(alive)
 
 	closed := new(WebsocketMock)
 	closed.UUID = closedUUID
-	pool[closed.UUID] = closed
+	pool.set(closed)
 
 	// setup expectations
 	alive.On("Emit", mock.Anything).Return(nil)
@@ -128,7 +154,7 @@ func TestGlobalEmitTo(t *testing.T) {
 }
 
 func TestGlobalEmitToList(t *testing.T) {
-	reset()
+	pool.reset()
 
 	uuids := []string{
 		"80a80sdf809dsf",
@@ -141,13 +167,13 @@ func TestGlobalEmitToList(t *testing.T) {
 		kws.On("Emit", mock.Anything).Return(nil)
 		kws.On("IsAlive").Return(true)
 		kws.wg.Add(1)
-		pool[kws.UUID] = kws
+		pool.set(kws)
 	}
 
 	// send global broadcast to all connections
 	EmitToList(uuids, []byte("test"))
 
-	for _, kws := range pool {
+	for _, kws := range pool.all() {
 		kws.(*WebsocketMock).wg.Wait()
 		kws.(*WebsocketMock).AssertNumberOfCalls(t, "Emit", 1)
 	}
@@ -178,8 +204,14 @@ func createWS() *Websocket {
 	return kws
 }
 
-func reset() {
-	pool = make(map[string]ws)
+func upgradeMiddleware(c *fiber.Ctx) error {
+	// IsWebSocketUpgrade returns true if the client
+	// requested upgrade to the WebSocket protocol.
+	if websocket.IsWebSocketUpgrade(c) {
+		c.Locals("allowed", true)
+		return c.Next()
+	}
+	return fiber.ErrUpgradeRequired
 }
 
 //
