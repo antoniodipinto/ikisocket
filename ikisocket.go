@@ -107,6 +107,7 @@ type ws interface {
 }
 
 type Websocket struct {
+	sync.RWMutex
 	// The Fiber.Websocket connection
 	ws *websocket.Conn
 	// Define if the connection is alive or not
@@ -194,16 +195,16 @@ func (l *safeListeners) set(event string, callback EventCallback) {
 }
 
 func (l *safeListeners) get(event string) []EventCallback {
+	l.RLock()
+	defer l.RUnlock()
 	if _, ok := l.list[event]; !ok {
 		return make([]EventCallback, 0)
 	}
 
-	l.RLock()
 	ret := make([]EventCallback, 0)
 	for _, v := range l.list[event] {
 		ret = append(ret, v)
 	}
-	l.RUnlock()
 	return ret
 }
 
@@ -251,16 +252,28 @@ func New(callback func(kws *Websocket)) func(*fiber.Ctx) error {
 }
 
 func (kws *Websocket) GetUUID() string {
+	kws.RLock()
+	defer kws.RUnlock()
 	return kws.UUID
+}
+
+func (kws *Websocket) SetUUID(uuid string) {
+	kws.Lock()
+	kws.UUID = uuid
+	kws.Unlock()
 }
 
 // Set a specific attribute for the specific socket connection
 func (kws *Websocket) SetAttribute(key string, attribute string) {
+	kws.Lock()
 	kws.attributes[key] = attribute
+	kws.Unlock()
 }
 
 // Get a specific attribute from the socket attributes
 func (kws *Websocket) GetAttribute(key string) string {
+	kws.RLock()
+	defer kws.RUnlock()
 	return kws.attributes[key]
 }
 
@@ -355,6 +368,8 @@ func (kws *Websocket) Close() {
 }
 
 func (kws *Websocket) IsAlive() bool {
+	kws.RLock()
+	defer kws.RUnlock()
 	return kws.isAlive
 }
 
@@ -367,10 +382,12 @@ func (kws *Websocket) pong() {
 
 // Add in message queue
 func (kws *Websocket) write(messageType int, messageBytes []byte) {
+	kws.Lock()
 	kws.queue[kws.randomUUID()] = message{
 		mType: messageType,
 		data:  messageBytes,
 	}
+	kws.Unlock()
 }
 
 // Start Pong/Read/Write functions
@@ -381,6 +398,7 @@ func (kws *Websocket) run() {
 
 	// every millisecond send messages from the queue
 	for range time.Tick(1 * time.Millisecond) {
+		kws.RLock()
 		if !kws.isAlive {
 			break
 		}
@@ -395,6 +413,7 @@ func (kws *Websocket) run() {
 			}
 			delete(kws.queue, uuid)
 		}
+		kws.RUnlock()
 	}
 }
 
@@ -405,7 +424,9 @@ func (kws *Websocket) read() {
 		if !kws.isAlive {
 			break
 		}
+		kws.RLock()
 		mtype, msg, err := kws.ws.ReadMessage()
+		kws.RUnlock()
 
 		if mtype == PingMessage {
 			kws.fireEvent(EventPing, nil, nil)
@@ -436,7 +457,9 @@ func (kws *Websocket) read() {
 // When the connection closes, disconnected method
 func (kws *Websocket) disconnected(err error) {
 	kws.fireEvent(EventDisconnect, nil, err)
+	kws.Lock()
 	kws.isAlive = false
+	kws.Unlock()
 
 	// Fire error event if the connection is
 	// disconnected by an error
@@ -446,7 +469,9 @@ func (kws *Websocket) disconnected(err error) {
 
 	// Close the connection from the server side
 	if kws.ws.Conn != nil {
+		kws.Lock()
 		err = kws.ws.Close()
+		kws.Unlock()
 
 		if err != nil {
 			kws.fireEvent(EventError, nil, err)
