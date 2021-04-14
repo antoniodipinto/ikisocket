@@ -117,7 +117,8 @@ type Websocket struct {
 	isAlive bool
 	// Queue of messages sent from the socket
 	queue chan message
-
+	// Channel to signal when this websocket is closed
+	// so go routines will stop gracefully
 	done chan struct{}
 	// Attributes map collection for the connection
 	attributes map[string]string
@@ -507,6 +508,8 @@ func (kws *Websocket) read(ctx context.Context) {
 // When the connection closes, disconnected method
 func (kws *Websocket) disconnected(err error) {
 	kws.fireEvent(EventDisconnect, nil, err)
+
+	// may be called multiple times from different go routines
 	if kws.IsAlive() {
 		close(kws.done)
 	}
@@ -517,6 +520,9 @@ func (kws *Websocket) disconnected(err error) {
 	if err != nil {
 		kws.fireEvent(EventError, nil, err)
 	}
+
+	// Don't close the websocket connection, because it will
+	// be closed by fiber
 
 	// Remove the socket from the pool
 	pool.delete(kws.UUID)
