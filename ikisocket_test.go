@@ -7,17 +7,15 @@ import (
 	fws "github.com/gofiber/websocket/v2"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"io"
-	"log"
-	"net/http"
-	"net/http/httptest"
-	"net/url"
+	"github.com/valyala/fasthttp/fasthttputil"
+	"net"
 	"sync"
 	"testing"
+	"time"
 )
 
 const numTestConn = 10
-const numParallelTestConn = 5000
+const numParallelTestConn = 5_000
 
 type HandlerMock struct {
 	mock.Mock
@@ -40,7 +38,6 @@ type WebsocketMock struct {
 
 func (h *HandlerMock) OnCustomEvent(payload *EventPayload) {
 	h.Called(payload)
-
 	h.wg.Done()
 }
 
@@ -58,96 +55,68 @@ func (s *WebsocketMock) GetUUID() string {
 	return s.UUID
 }
 
-type testHandler struct {
-	app *fiber.App
-}
-
-func (h *testHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.app.Test(r)
-	if err != nil {
-		panic(err)
-	}
-	for name, values := range resp.Header {
-		w.Header()[name] = values
-	}
-	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(w, resp.Body)
-	_ = resp.Body.Close()
-}
-
 func TestParallelConnections(t *testing.T) {
-	app := fiber.New()
+	pool.reset()
 
+	// create test server
+	cfg := fiber.Config{
+		DisableStartupMessage: true,
+	}
+	app := fiber.New(cfg)
+	ln := fasthttputil.NewInmemoryListener()
+	wg := sync.WaitGroup{}
+
+	defer func() {
+		_ = app.Shutdown()
+		_ = ln.Close()
+	}()
+
+	// attach upgrade middleware
 	app.Use(upgradeMiddleware)
 
-	wg := sync.WaitGroup{}
-	On(EventConnect, func(payload *EventPayload) {
-		// wg.Done()
-		payload.Kws.Emit([]byte("response"))
-		log.Println("hi")
-	})
+	// send back response on correct message
 	On(EventMessage, func(payload *EventPayload) {
-		log.Println(payload.Data)
-	})
-	On(EventClose, func(payload *EventPayload) {
-		log.Println("Close")
-	})
-	On(EventDisconnect, func(payload *EventPayload) {
-		log.Println("Disconnect")
+		if string(payload.Data) == "test" {
+			payload.Kws.Emit([]byte("response"))
+		}
 	})
 
+	// create websocket endpoint
 	app.Get("/", New(func(kws *Websocket) {
-		// log.Println("conn")
-
 	}))
 
-	s := httptest.NewServer(&testHandler{
-		app,
-	})
-	// s := httptest.NewServer(adaptor.FiberHandler(New(func(kws *Websocket) {
-	// 	log.Println("test")
-	//
-	// 	On(EventConnect, func(payload *EventPayload) {
-	// 		log.Println("jep")
-	// 		payload.Kws.Emit([]byte("response"))
-	// 		wg.Done()
-	// 	})
-	// })))
+	// start server
+	go func() {
+		_ = app.Listener(ln)
+	}()
 
-	wsURL := httpToWs(t, s.URL)
+	wsURL := "ws://" + ln.Addr().String()
 
-	defer s.Close()
-
-	// req := httptest.NewRequest(fiber.MethodGet, "/", nil)
-
-	// req := httptest.NewRequest(fiber.MethodGet, "/", nil)
-	// req.Header.Set("Connection", "Upgrade")
-	// req.Header.Set("Upgrade", "Websocket")
-	// req.Header.Set("Sec-WebSocket-Key", "veQ+5bJcQAhyLAn+SnM5YA==")
-	// req.Header.Set("Sec-WebSocket-Version", "13")
+	// create concurrent connections
 	for i := 0; i < numParallelTestConn; i++ {
 		wg.Add(1)
-		// resp, err := app.Test(req, -1)
-		// require.Nil(t, err)
-		// require.Equal(t, fiber.StatusSwitchingProtocols, resp.StatusCode)
 		go func() {
-			ws, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+			dialer := &websocket.Dialer{
+				NetDial: func(network, addr string) (net.Conn, error) {
+					return ln.Dial()
+				},
+				HandshakeTimeout: 45 * time.Second,
+			}
+			ws, _, err := dialer.Dial(wsURL, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			// if err := ws.WriteMessage(websocket.TextMessage, []byte("test")); err != nil {
-			// 	t.Fatal(err)
-			// }
-
-			// time.Sleep(1 * time.Second)
+			if err := ws.WriteMessage(websocket.TextMessage, []byte("test")); err != nil {
+				t.Fatal(err)
+			}
 
 			tp, m, err := ws.ReadMessage()
 			if err != nil {
 				t.Fatal(err)
 			}
 			require.Equal(t, TextMessage, tp)
-			require.Equal(t, "response", m)
+			require.Equal(t, "response", string(m))
 			wg.Done()
 
 			if err := ws.Close(); err != nil {
@@ -156,23 +125,6 @@ func TestParallelConnections(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	// time.Sleep(500 * time.Millisecond)
-}
-
-func httpToWs(t *testing.T, u string) string {
-	wsURL, err := url.Parse(u)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	switch wsURL.Scheme {
-	case "http":
-		wsURL.Scheme = "ws"
-	case "https":
-		wsURL.Scheme = "wss"
-	}
-
-	return wsURL.String()
 }
 
 func TestGlobalFire(t *testing.T) {

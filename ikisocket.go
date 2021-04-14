@@ -518,17 +518,6 @@ func (kws *Websocket) disconnected(err error) {
 		kws.fireEvent(EventError, nil, err)
 	}
 
-	// Close the connection from the server side
-	if kws.hasConn() {
-		kws.Lock()
-		err = kws.ws.Close()
-		kws.Unlock()
-
-		if err != nil {
-			kws.fireEvent(EventError, nil, err)
-		}
-	}
-
 	// Remove the socket from the pool
 	pool.delete(kws.UUID)
 }
