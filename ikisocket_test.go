@@ -1,11 +1,17 @@
 package ikisocket
 
 import (
+	"context"
+	"github.com/fasthttp/websocket"
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/websocket/v2"
+	fws "github.com/gofiber/websocket/v2"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"io"
+	"log"
+	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync"
 	"testing"
 )
@@ -52,23 +58,121 @@ func (s *WebsocketMock) GetUUID() string {
 	return s.UUID
 }
 
+type testHandler struct {
+	app *fiber.App
+}
+
+func (h *testHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	resp, err := h.app.Test(r)
+	if err != nil {
+		panic(err)
+	}
+	for name, values := range resp.Header {
+		w.Header()[name] = values
+	}
+	w.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(w, resp.Body)
+	_ = resp.Body.Close()
+}
+
 func TestParallelConnections(t *testing.T) {
 	app := fiber.New()
 
 	app.Use(upgradeMiddleware)
 
-	app.Get("/", New(func(kws *Websocket) {}))
+	wg := sync.WaitGroup{}
+	On(EventConnect, func(payload *EventPayload) {
+		// wg.Done()
+		payload.Kws.Emit([]byte("response"))
+		log.Println("hi")
+	})
+	On(EventMessage, func(payload *EventPayload) {
+		log.Println(payload.Data)
+	})
+	On(EventClose, func(payload *EventPayload) {
+		log.Println("Close")
+	})
+	On(EventDisconnect, func(payload *EventPayload) {
+		log.Println("Disconnect")
+	})
 
-	req := httptest.NewRequest(fiber.MethodGet, "/", nil)
-	req.Header.Set("Connection", "Upgrade")
-	req.Header.Set("Upgrade", "Websocket")
-	req.Header.Set("Sec-WebSocket-Key", "veQ+5bJcQAhyLAn+SnM5YA==")
-	req.Header.Set("Sec-WebSocket-Version", "13")
+	app.Get("/", New(func(kws *Websocket) {
+		// log.Println("conn")
+
+	}))
+
+	s := httptest.NewServer(&testHandler{
+		app,
+	})
+	// s := httptest.NewServer(adaptor.FiberHandler(New(func(kws *Websocket) {
+	// 	log.Println("test")
+	//
+	// 	On(EventConnect, func(payload *EventPayload) {
+	// 		log.Println("jep")
+	// 		payload.Kws.Emit([]byte("response"))
+	// 		wg.Done()
+	// 	})
+	// })))
+
+	wsURL := httpToWs(t, s.URL)
+
+	defer s.Close()
+
+	// req := httptest.NewRequest(fiber.MethodGet, "/", nil)
+
+	// req := httptest.NewRequest(fiber.MethodGet, "/", nil)
+	// req.Header.Set("Connection", "Upgrade")
+	// req.Header.Set("Upgrade", "Websocket")
+	// req.Header.Set("Sec-WebSocket-Key", "veQ+5bJcQAhyLAn+SnM5YA==")
+	// req.Header.Set("Sec-WebSocket-Version", "13")
 	for i := 0; i < numParallelTestConn; i++ {
-		resp, err := app.Test(req, -1)
-		require.Nil(t, err)
-		require.Equal(t, fiber.StatusSwitchingProtocols, resp.StatusCode)
+		wg.Add(1)
+		// resp, err := app.Test(req, -1)
+		// require.Nil(t, err)
+		// require.Equal(t, fiber.StatusSwitchingProtocols, resp.StatusCode)
+		go func() {
+			ws, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// if err := ws.WriteMessage(websocket.TextMessage, []byte("test")); err != nil {
+			// 	t.Fatal(err)
+			// }
+
+			// time.Sleep(1 * time.Second)
+
+			tp, m, err := ws.ReadMessage()
+			if err != nil {
+				t.Fatal(err)
+			}
+			require.Equal(t, TextMessage, tp)
+			require.Equal(t, "response", m)
+			wg.Done()
+
+			if err := ws.Close(); err != nil {
+				t.Fatal(err)
+			}
+		}()
 	}
+	wg.Wait()
+	// time.Sleep(500 * time.Millisecond)
+}
+
+func httpToWs(t *testing.T, u string) string {
+	wsURL, err := url.Parse(u)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	switch wsURL.Scheme {
+	case "http":
+		wsURL.Scheme = "ws"
+	case "https":
+		wsURL.Scheme = "wss"
+	}
+
+	return wsURL.String()
 }
 
 func TestGlobalFire(t *testing.T) {
@@ -102,21 +206,25 @@ func TestGlobalFire(t *testing.T) {
 func TestGlobalBroadcast(t *testing.T) {
 	pool.reset()
 
-	mws := new(WebsocketMock)
-	mws.UUID = "80a80sdf809dsf"
-	pool.set(mws)
+	for i := 0; i < numParallelTestConn; i++ {
+		mws := new(WebsocketMock)
+		mws.UUID = "80a80sdf809dsf"
+		pool.set(mws)
 
-	// setup expectations
-	mws.On("Emit", mock.Anything).Return(nil)
+		// setup expectations
+		mws.On("Emit", mock.Anything).Return(nil)
 
-	mws.wg.Add(1)
+		mws.wg.Add(1)
+	}
 
 	// send global broadcast to all connections
 	Broadcast([]byte("test"))
 
-	mws.wg.Wait()
+	for _, mws := range pool.all() {
+		mws.(*WebsocketMock).wg.Wait()
+		mws.(*WebsocketMock).AssertNumberOfCalls(t, "Emit", 1)
+	}
 
-	mws.AssertNumberOfCalls(t, "Emit", 1)
 }
 
 func TestGlobalEmitTo(t *testing.T) {
@@ -197,7 +305,7 @@ func createWS() *Websocket {
 		Cookies: func(key string, defaultValue ...string) string {
 			return ""
 		},
-		queue:      make(map[string]message),
+		queue:      make(chan message),
 		attributes: make(map[string]string),
 		isAlive:    true,
 	}
@@ -210,7 +318,7 @@ func createWS() *Websocket {
 func upgradeMiddleware(c *fiber.Ctx) error {
 	// IsWebSocketUpgrade returns true if the client
 	// requested upgrade to the WebSocket protocol.
-	if websocket.IsWebSocketUpgrade(c) {
+	if fws.IsWebSocketUpgrade(c) {
 		c.Locals("allowed", true)
 		return c.Next()
 	}
@@ -249,7 +357,7 @@ func (s *WebsocketMock) Close() {
 	panic("implement me")
 }
 
-func (s *WebsocketMock) pong() {
+func (s *WebsocketMock) pong(_ context.Context) {
 	panic("implement me")
 }
 
@@ -261,7 +369,7 @@ func (s *WebsocketMock) run() {
 	panic("implement me")
 }
 
-func (s *WebsocketMock) read() {
+func (s *WebsocketMock) read(_ context.Context) {
 	panic("implement me")
 }
 

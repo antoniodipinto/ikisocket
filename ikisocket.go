@@ -1,6 +1,7 @@
 package ikisocket
 
 import (
+	"context"
 	"errors"
 	"math/rand"
 	"sync"
@@ -98,10 +99,10 @@ type ws interface {
 	Fire(event string, data []byte)
 	Emit(message []byte)
 	Close()
-	pong()
+	pong(ctx context.Context)
 	write(messageType int, messageBytes []byte)
 	run()
-	read()
+	read(ctx context.Context)
 	disconnected(err error)
 	createUUID() string
 	randomUUID() string
@@ -115,7 +116,9 @@ type Websocket struct {
 	// Define if the connection is alive or not
 	isAlive bool
 	// Queue of messages sent from the socket
-	queue map[string]message
+	queue chan message
+
+	done chan struct{}
 	// Attributes map collection for the connection
 	attributes map[string]string
 	// Unique id of the connection
@@ -218,7 +221,6 @@ var listeners = safeListeners{
 
 func New(callback func(kws *Websocket)) func(*fiber.Ctx) error {
 	return websocket.New(func(c *websocket.Conn) {
-
 		kws := &Websocket{
 			ws: c,
 			Locals: func(key string) interface{} {
@@ -233,7 +235,8 @@ func New(callback func(kws *Websocket)) func(*fiber.Ctx) error {
 			Cookies: func(key string, defaultValue ...string) string {
 				return c.Cookies(key, defaultValue...)
 			},
-			queue:      make(map[string]message),
+			queue:      make(chan message, 100),
+			done:       make(chan struct{}, 1),
 			attributes: make(map[string]string),
 			isAlive:    true,
 		}
@@ -273,8 +276,8 @@ func (kws *Websocket) SetUUID(uuid string) {
 // Set a specific attribute for the specific socket connection
 func (kws *Websocket) SetAttribute(key string, attribute string) {
 	kws.Lock()
+	defer kws.Unlock()
 	kws.attributes[key] = attribute
-	kws.Unlock()
 }
 
 // Get a specific attribute from the socket attributes
@@ -371,6 +374,8 @@ func (kws *Websocket) Emit(message []byte) {
 func (kws *Websocket) Close() {
 	kws.write(CloseMessage, []byte("Connection closed"))
 	kws.fireEvent(EventClose, nil, nil)
+	kws.Lock()
+	defer kws.Unlock()
 	kws.isAlive = false
 }
 
@@ -380,93 +385,132 @@ func (kws *Websocket) IsAlive() bool {
 	return kws.isAlive
 }
 
+func (kws *Websocket) hasConn() bool {
+	kws.RLock()
+	defer kws.RUnlock()
+	return kws.ws.Conn != nil
+}
+
+func (kws *Websocket) setAlive(alive bool) {
+	kws.Lock()
+	defer kws.Unlock()
+	kws.isAlive = alive
+}
+
+func (kws *Websocket) queueLength() int {
+	kws.RLock()
+	defer kws.RUnlock()
+	return len(kws.queue)
+}
+
 // pong writes a control message to the client
-func (kws *Websocket) pong() {
-	for range time.Tick(5 * time.Second) {
-		kws.write(PongMessage, []byte{})
+func (kws *Websocket) pong(ctx context.Context) {
+	for {
+		select {
+		case <-time.Tick(1 * time.Second):
+			kws.write(PongMessage, []byte{})
+		case <-ctx.Done():
+			return
+		}
 	}
 }
 
 // Add in message queue
 func (kws *Websocket) write(messageType int, messageBytes []byte) {
-	kws.Lock()
-	kws.queue[kws.randomUUID()] = message{
+	// kws.Lock()
+	// defer kws.Unlock()
+	kws.queue <- message{
 		mType: messageType,
 		data:  messageBytes,
 	}
-	kws.Unlock()
 }
 
-// Start Pong/Read/Write functions
-func (kws *Websocket) run() {
+// Send out message queue
+func (kws *Websocket) send(ctx context.Context) {
+	for {
+		select {
+		case message := <-kws.queue:
+			if !kws.hasConn() {
+				continue
+			}
 
-	go kws.pong()
-	go kws.read()
-
-	// every millisecond send messages from the queue
-	for range time.Tick(1 * time.Millisecond) {
-		kws.RLock()
-		if !kws.isAlive {
-			break
-		}
-		if len(kws.queue) == 0 {
-			continue
-		}
-		for uuid, message := range kws.queue {
-
+			kws.Lock()
 			err := kws.ws.WriteMessage(message.mType, message.data)
+			kws.Unlock()
+
 			if err != nil {
 				kws.disconnected(err)
 			}
-			delete(kws.queue, uuid)
+		case <-ctx.Done():
+			return
 		}
-		kws.RUnlock()
 	}
+}
+
+// Start Pong/Read/Write functions
+//
+// Needs to be blocking, otherwise the connection would close.
+func (kws *Websocket) run() {
+	ctx, cancelFunc := context.WithCancel(context.Background())
+
+	go kws.pong(ctx)
+	go kws.read(ctx)
+	go kws.send(ctx)
+
+	<-kws.done // block until one event is sent to the done channel
+
+	cancelFunc()
 }
 
 // Listen for incoming messages
 // and filter by message type
-func (kws *Websocket) read() {
-	for range time.Tick(10 * time.Millisecond) {
-		if !kws.isAlive {
-			break
-		}
-		kws.RLock()
-		mtype, msg, err := kws.ws.ReadMessage()
-		kws.RUnlock()
+func (kws *Websocket) read(ctx context.Context) {
+	for {
+		select {
+		case <-time.Tick(10 * time.Millisecond):
+			if !kws.hasConn() {
+				continue
+			}
 
-		if mtype == PingMessage {
-			kws.fireEvent(EventPing, nil, nil)
-			continue
-		}
+			kws.RLock()
+			mtype, msg, err := kws.ws.ReadMessage()
+			kws.RUnlock()
 
-		if mtype == PongMessage {
-			kws.fireEvent(EventPong, nil, nil)
-			continue
-		}
+			if mtype == PingMessage {
+				kws.fireEvent(EventPing, nil, nil)
+				continue
+			}
 
-		if mtype == CloseMessage {
-			kws.disconnected(nil)
-			break
-		}
+			if mtype == PongMessage {
+				kws.fireEvent(EventPong, nil, nil)
+				continue
+			}
 
-		if err != nil {
-			kws.disconnected(err)
-			break
-		}
+			if mtype == CloseMessage {
+				kws.disconnected(nil)
+				return
+			}
 
-		// We have a message and we fire the message event
-		kws.fireEvent(EventMessage, msg, nil)
-		continue
+			if err != nil {
+				kws.disconnected(err)
+				return
+			}
+
+			// We have a message and we fire the message event
+			kws.fireEvent(EventMessage, msg, nil)
+		case <-ctx.Done():
+			return
+		}
 	}
 }
 
 // When the connection closes, disconnected method
 func (kws *Websocket) disconnected(err error) {
 	kws.fireEvent(EventDisconnect, nil, err)
-	kws.Lock()
-	kws.isAlive = false
-	kws.Unlock()
+	if kws.IsAlive() {
+		close(kws.done)
+	}
+	kws.setAlive(false)
 
 	// Fire error event if the connection is
 	// disconnected by an error
@@ -475,7 +519,7 @@ func (kws *Websocket) disconnected(err error) {
 	}
 
 	// Close the connection from the server side
-	if kws.ws.Conn != nil {
+	if kws.hasConn() {
 		kws.Lock()
 		err = kws.ws.Close()
 		kws.Unlock()
