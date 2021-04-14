@@ -35,6 +35,33 @@ New(callback func(kws *Websocket)) func(*fiber.Ctx) error
 // Add listener callback for an event into the listeners list
 On(event string, callback func(payload *EventPayload))
 ```
+
+ikisocket public/global functions (many thanks to [Daniel Morawetz](https://github.com/dmorawetz))
+
+```go
+// Emit the message to a specific socket uuids list
+// Ignores all errors
+EmitToList(uuids []string, message []byte)
+```
+---
+
+```go
+// Emit to a specific socket connection
+EmitTo(uuid string, message []byte) error
+```
+---
+
+```go
+// Broadcast to all the active connections
+// except avoid broadcasting the message to itself
+Broadcast(message []byte)
+```
+---
+```go
+// Fire custom event on all connections
+Fire(event string, data []byte) 
+```
+
 Supported events:
 
 ```go
@@ -84,12 +111,31 @@ type EventPayload struct {
 ---
 
 
+Socket instance functions
+
 ```go
 // Set a specific attribute for the specific socket connection
 func (kws *Websocket) SetAttribute(key string, attribute string)
 ```
 ---
 
+```go
+// Get socket connection UUID
+func (kws *Websocket) GetUUID() string
+```
+---
+
+```go
+// Set socket connection UUID
+func (kws *Websocket) SetUUID(uuid string)
+```
+---
+
+```go
+// Set socket connection UUID
+func (kws *Websocket) SetUUID(uuid string)
+```
+---
 
 ```go
 // Get a specific attribute from the socket attributes
@@ -138,10 +184,6 @@ func (kws *Websocket) Close()
 ---
 
 ## ⚡️ [Examples](https://github.com/antoniodipinto/ikisocket/tree/master/examples)
-
-
-
-
 
 
 

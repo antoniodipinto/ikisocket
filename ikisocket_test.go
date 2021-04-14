@@ -11,7 +11,7 @@ import (
 )
 
 const numTestConn = 10
-const numParallelTestConn = 50_000
+const numParallelTestConn = 5000
 
 type HandlerMock struct {
 	mock.Mock
@@ -34,6 +34,7 @@ type WebsocketMock struct {
 
 func (h *HandlerMock) OnCustomEvent(payload *EventPayload) {
 	h.Called(payload)
+
 	h.wg.Done()
 }
 
@@ -83,10 +84,12 @@ func TestGlobalFire(t *testing.T) {
 	// setup expectations
 	h.On("OnCustomEvent", mock.Anything).Return(nil)
 
+	// Moved before registration of the event
+	// if after can cause: panic: sync: negative WaitGroup counter
+	h.wg.Add(numTestConn)
+
 	// register custom event handler
 	On("customevent", h.OnCustomEvent)
-
-	h.wg.Add(numTestConn)
 
 	// fire global custom event on all connections
 	Fire("customevent", []byte("test"))
