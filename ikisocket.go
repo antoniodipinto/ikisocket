@@ -472,9 +472,9 @@ func (kws *Websocket) read(ctx context.Context) {
 				continue
 			}
 
-			kws.RLock()
+			kws.Lock()
 			mtype, msg, err := kws.ws.ReadMessage()
-			kws.RUnlock()
+			kws.Unlock()
 
 			if mtype == PingMessage {
 				kws.fireEvent(EventPing, nil, nil)
