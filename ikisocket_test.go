@@ -258,7 +258,7 @@ func createWS() *Websocket {
 			return ""
 		},
 		queue:      make(chan message),
-		attributes: make(map[string]string),
+		attributes: make(map[string]interface{}),
 		isAlive:    true,
 	}
 
@@ -281,11 +281,11 @@ func upgradeMiddleware(c *fiber.Ctx) error {
 // needed but not used
 //
 
-func (s *WebsocketMock) SetAttribute(_ string, _ string) {
+func (s *WebsocketMock) SetAttribute(_ string, _ interface{}) {
 	panic("implement me")
 }
 
-func (s *WebsocketMock) GetAttribute(_ string) string {
+func (s *WebsocketMock) GetAttribute(_ string) interface{} {
 	panic("implement me")
 }
 

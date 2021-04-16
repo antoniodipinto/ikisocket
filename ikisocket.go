@@ -79,7 +79,7 @@ type EventPayload struct {
 	// Unique connection UUID
 	SocketUUID string
 	// Optional websocket attributes
-	SocketAttributes map[string]string
+	SocketAttributes map[string]interface{}
 	// Optional error when are fired events like
 	// - Disconnect
 	// - Error
@@ -91,8 +91,8 @@ type EventPayload struct {
 type ws interface {
 	IsAlive() bool
 	GetUUID() string
-	SetAttribute(key string, attribute string)
-	GetAttribute(key string) string
+	SetAttribute(key string, attribute interface{})
+	GetAttribute(key string) interface{}
 	EmitToList(uuids []string, message []byte)
 	EmitTo(uuid string, message []byte) error
 	Broadcast(message []byte, except bool)
@@ -121,7 +121,7 @@ type Websocket struct {
 	// so go routines will stop gracefully
 	done chan struct{}
 	// Attributes map collection for the connection
-	attributes map[string]string
+	attributes map[string]interface{}
 	// Unique id of the connection
 	UUID string
 	// Wrap Fiber Locals function
@@ -238,7 +238,7 @@ func New(callback func(kws *Websocket)) func(*fiber.Ctx) error {
 			},
 			queue:      make(chan message, 100),
 			done:       make(chan struct{}, 1),
-			attributes: make(map[string]string),
+			attributes: make(map[string]interface{}),
 			isAlive:    true,
 		}
 
@@ -275,14 +275,14 @@ func (kws *Websocket) SetUUID(uuid string) {
 }
 
 // Set a specific attribute for the specific socket connection
-func (kws *Websocket) SetAttribute(key string, attribute string) {
+func (kws *Websocket) SetAttribute(key string, attribute interface{}) {
 	kws.Lock()
 	defer kws.Unlock()
 	kws.attributes[key] = attribute
 }
 
 // Get a specific attribute from the socket attributes
-func (kws *Websocket) GetAttribute(key string) string {
+func (kws *Websocket) GetAttribute(key string) interface{} {
 	kws.RLock()
 	defer kws.RUnlock()
 	return kws.attributes[key]
