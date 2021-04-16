@@ -242,6 +242,59 @@ func TestGlobalEmitToList(t *testing.T) {
 	}
 }
 
+func TestWebsocket_GetIntAttribute(t *testing.T) {
+	kws := &Websocket{
+		attributes: make(map[string]interface{}),
+	}
+
+	// get unset attribute
+	assertPanic(t, func() {
+		kws.GetIntAttribute("unknown")
+	})
+
+	// get non-int attribute
+	kws.SetAttribute("notInt", "")
+	assertPanic(t, func() {
+		kws.GetIntAttribute("notInt")
+	})
+
+	// get int attribute
+	kws.SetAttribute("int", 3)
+	v := kws.GetIntAttribute("int")
+	require.Equal(t, 3, v)
+}
+
+func TestWebsocket_GetStringAttribute(t *testing.T) {
+	kws := &Websocket{
+		attributes: make(map[string]interface{}),
+	}
+
+	// get unset attribute
+	assertPanic(t, func() {
+		kws.GetStringAttribute("unknown")
+	})
+
+	// get non-string attribute
+	kws.SetAttribute("notString", 3)
+	assertPanic(t, func() {
+		kws.GetStringAttribute("notString")
+	})
+
+	// get string attribute
+	kws.SetAttribute("str", "3")
+	v := kws.GetStringAttribute("str")
+	require.Equal(t, "3", v)
+}
+
+func assertPanic(t *testing.T, f func()) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Errorf("The code did not panic")
+		}
+	}()
+	f()
+}
+
 func createWS() *Websocket {
 	kws := &Websocket{
 		ws: nil,

@@ -288,6 +288,22 @@ func (kws *Websocket) GetAttribute(key string) interface{} {
 	return kws.attributes[key]
 }
 
+// Convenience method to retrieve an attribute as an int.
+// Will panic if attribute is not an int.
+func (kws *Websocket) GetIntAttribute(key string) int {
+	kws.mu.RLock()
+	defer kws.mu.RUnlock()
+	return kws.attributes[key].(int)
+}
+
+// Convenience method to retrieve an attribute as a string.
+// Will panic if attribute is not an int.
+func (kws *Websocket) GetStringAttribute(key string) string {
+	kws.mu.RLock()
+	defer kws.mu.RUnlock()
+	return kws.attributes[key].(string)
+}
+
 // Emit the message to a specific socket uuids list
 func (kws *Websocket) EmitToList(uuids []string, message []byte) {
 	for _, uuid := range uuids {
