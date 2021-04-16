@@ -375,9 +375,7 @@ func (kws *Websocket) Emit(message []byte) {
 func (kws *Websocket) Close() {
 	kws.write(CloseMessage, []byte("Connection closed"))
 	kws.fireEvent(EventClose, nil, nil)
-	kws.Lock()
-	defer kws.Unlock()
-	kws.isAlive = false
+	// don't set alive to false, because this will be done in disconnected
 }
 
 func (kws *Websocket) IsAlive() bool {
