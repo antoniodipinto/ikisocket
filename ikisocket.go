@@ -418,8 +418,6 @@ func (kws *Websocket) pong(ctx context.Context) {
 
 // Add in message queue
 func (kws *Websocket) write(messageType int, messageBytes []byte) {
-	// kws.Lock()
-	// defer kws.Unlock()
 	kws.queue <- message{
 		mType: messageType,
 		data:  messageBytes,
@@ -432,12 +430,17 @@ func (kws *Websocket) send(ctx context.Context) {
 		select {
 		case message := <-kws.queue:
 			if !kws.hasConn() {
+				// retry after 20 ms without blocking the sending thread
+				go func() {
+					time.Sleep(20 * time.Millisecond)
+					kws.queue <- message
+				}()
 				continue
 			}
 
-			kws.Lock()
+			kws.RLock()
 			err := kws.ws.WriteMessage(message.mType, message.data)
-			kws.Unlock()
+			kws.RUnlock()
 
 			if err != nil {
 				kws.disconnected(err)
@@ -473,9 +476,9 @@ func (kws *Websocket) read(ctx context.Context) {
 				continue
 			}
 
-			kws.Lock()
+			kws.RLock()
 			mtype, msg, err := kws.ws.ReadMessage()
-			kws.Unlock()
+			kws.RUnlock()
 
 			if mtype == PingMessage {
 				kws.fireEvent(EventPing, nil, nil)
