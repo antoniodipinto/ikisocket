@@ -110,7 +110,7 @@ type ws interface {
 }
 
 type Websocket struct {
-	sync.RWMutex
+	mu sync.RWMutex
 	// The Fiber.Websocket connection
 	ws *websocket.Conn
 	// Define if the connection is alive or not
@@ -192,23 +192,23 @@ func (p *safePool) reset() {
 
 type safeListeners struct {
 	sync.RWMutex
-	list map[string][]EventCallback
+	list map[string][]eventCallback
 }
 
-func (l *safeListeners) set(event string, callback EventCallback) {
+func (l *safeListeners) set(event string, callback eventCallback) {
 	l.Lock()
 	listeners.list[event] = append(listeners.list[event], callback)
 	l.Unlock()
 }
 
-func (l *safeListeners) get(event string) []EventCallback {
+func (l *safeListeners) get(event string) []eventCallback {
 	l.RLock()
 	defer l.RUnlock()
 	if _, ok := l.list[event]; !ok {
-		return make([]EventCallback, 0)
+		return make([]eventCallback, 0)
 	}
 
-	ret := make([]EventCallback, 0)
+	ret := make([]eventCallback, 0)
 	for _, v := range l.list[event] {
 		ret = append(ret, v)
 	}
@@ -217,7 +217,7 @@ func (l *safeListeners) get(event string) []EventCallback {
 
 // List of the listeners for the events
 var listeners = safeListeners{
-	list: make(map[string][]EventCallback),
+	list: make(map[string][]eventCallback),
 }
 
 func New(callback func(kws *Websocket)) func(*fiber.Ctx) error {
@@ -259,14 +259,14 @@ func New(callback func(kws *Websocket)) func(*fiber.Ctx) error {
 }
 
 func (kws *Websocket) GetUUID() string {
-	kws.RLock()
-	defer kws.RUnlock()
+	kws.mu.RLock()
+	defer kws.mu.RUnlock()
 	return kws.UUID
 }
 
 func (kws *Websocket) SetUUID(uuid string) {
-	kws.Lock()
-	defer kws.Unlock()
+	kws.mu.Lock()
+	defer kws.mu.Unlock()
 
 	if pool.contains(uuid) {
 		panic(ErrorUUIDDuplication)
@@ -276,15 +276,15 @@ func (kws *Websocket) SetUUID(uuid string) {
 
 // Set a specific attribute for the specific socket connection
 func (kws *Websocket) SetAttribute(key string, attribute interface{}) {
-	kws.Lock()
-	defer kws.Unlock()
+	kws.mu.Lock()
+	defer kws.mu.Unlock()
 	kws.attributes[key] = attribute
 }
 
 // Get a specific attribute from the socket attributes
 func (kws *Websocket) GetAttribute(key string) interface{} {
-	kws.RLock()
-	defer kws.RUnlock()
+	kws.mu.RLock()
+	defer kws.mu.RUnlock()
 	return kws.attributes[key]
 }
 
@@ -379,26 +379,26 @@ func (kws *Websocket) Close() {
 }
 
 func (kws *Websocket) IsAlive() bool {
-	kws.RLock()
-	defer kws.RUnlock()
+	kws.mu.RLock()
+	defer kws.mu.RUnlock()
 	return kws.isAlive
 }
 
 func (kws *Websocket) hasConn() bool {
-	kws.RLock()
-	defer kws.RUnlock()
+	kws.mu.RLock()
+	defer kws.mu.RUnlock()
 	return kws.ws.Conn != nil
 }
 
 func (kws *Websocket) setAlive(alive bool) {
-	kws.Lock()
-	defer kws.Unlock()
+	kws.mu.Lock()
+	defer kws.mu.Unlock()
 	kws.isAlive = alive
 }
 
 func (kws *Websocket) queueLength() int {
-	kws.RLock()
-	defer kws.RUnlock()
+	kws.mu.RLock()
+	defer kws.mu.RUnlock()
 	return len(kws.queue)
 }
 
@@ -436,9 +436,9 @@ func (kws *Websocket) send(ctx context.Context) {
 				continue
 			}
 
-			kws.RLock()
+			kws.mu.RLock()
 			err := kws.ws.WriteMessage(message.mType, message.data)
-			kws.RUnlock()
+			kws.mu.RUnlock()
 
 			if err != nil {
 				kws.disconnected(err)
@@ -474,9 +474,9 @@ func (kws *Websocket) read(ctx context.Context) {
 				continue
 			}
 
-			kws.RLock()
+			kws.mu.RLock()
 			mtype, msg, err := kws.ws.ReadMessage()
-			kws.RUnlock()
+			kws.mu.RUnlock()
 
 			if mtype == PingMessage {
 				kws.fireEvent(EventPing, nil, nil)
@@ -578,9 +578,9 @@ func (kws *Websocket) fireEvent(event string, data []byte, error error) {
 	}
 }
 
-type EventCallback func(payload *EventPayload)
+type eventCallback func(payload *EventPayload)
 
 // Add listener callback for an event into the listeners list
-func On(event string, callback EventCallback) {
+func On(event string, callback eventCallback) {
 	listeners.set(event, callback)
 }
