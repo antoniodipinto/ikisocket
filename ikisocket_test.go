@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp/fasthttputil"
+	"math/rand"
 	"net"
 	"sync"
 	"testing"
@@ -24,6 +25,7 @@ type HandlerMock struct {
 
 type WebsocketMock struct {
 	mock.Mock
+	mu         sync.RWMutex
 	wg         sync.WaitGroup
 	ws         *websocket.Conn
 	isAlive    bool
@@ -34,6 +36,25 @@ type WebsocketMock struct {
 	Params     func(key string, defaultValue ...string) string
 	Query      func(key string, defaultValue ...string) string
 	Cookies    func(key string, defaultValue ...string) string
+}
+
+func (s *WebsocketMock) SetUUID(uuid string) {
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if pool.contains(uuid) {
+		panic(ErrorUUIDDuplication)
+	}
+	s.UUID = uuid
+}
+
+func (s *WebsocketMock) GetIntAttribute(key string) int {
+	panic("implement me")
+}
+
+func (s *WebsocketMock) GetStringAttribute(key string) string {
+	panic("implement me")
 }
 
 func (h *HandlerMock) OnCustomEvent(payload *EventPayload) {
@@ -104,23 +125,27 @@ func TestParallelConnections(t *testing.T) {
 			}
 			ws, _, err := dialer.Dial(wsURL, nil)
 			if err != nil {
-				t.Fatal(err)
+				t.Error(err)
+				return
 			}
 
 			if err := ws.WriteMessage(websocket.TextMessage, []byte("test")); err != nil {
-				t.Fatal(err)
+				t.Error(err)
+				return
 			}
 
 			tp, m, err := ws.ReadMessage()
 			if err != nil {
-				t.Fatal(err)
+				t.Error(err)
+				return
 			}
 			require.Equal(t, TextMessage, tp)
 			require.Equal(t, "response", string(m))
 			wg.Done()
 
 			if err := ws.Close(); err != nil {
-				t.Fatal(err)
+				t.Error(err)
+				return
 			}
 		}()
 	}
@@ -160,7 +185,7 @@ func TestGlobalBroadcast(t *testing.T) {
 
 	for i := 0; i < numParallelTestConn; i++ {
 		mws := new(WebsocketMock)
-		mws.UUID = "80a80sdf809dsf"
+		mws.SetUUID(mws.createUUID())
 		pool.set(mws)
 
 		// setup expectations
@@ -226,7 +251,7 @@ func TestGlobalEmitToList(t *testing.T) {
 
 	for _, uuid := range uuids {
 		kws := new(WebsocketMock)
-		kws.UUID = uuid
+		kws.SetUUID(uuid)
 		kws.On("Emit", mock.Anything).Return(nil)
 		kws.On("IsAlive").Return(true)
 		kws.wg.Add(1)
@@ -383,11 +408,20 @@ func (s *WebsocketMock) disconnected(_ error) {
 }
 
 func (s *WebsocketMock) createUUID() string {
-	panic("implement me")
+	return s.randomUUID()
 }
 
 func (s *WebsocketMock) randomUUID() string {
-	panic("implement me")
+	length := 100
+	seed := rand.New(rand.NewSource(time.Now().UnixNano()))
+	charset := "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz"
+
+	b := make([]byte, length)
+	for i := range b {
+		b[i] = charset[seed.Intn(len(charset))]
+	}
+
+	return string(b)
 }
 
 func (s *WebsocketMock) fireEvent(_ string, _ []byte, _ error) {

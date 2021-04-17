@@ -33,31 +33,41 @@ const (
 
 // Supported event list
 const (
-	// Fired when a Text/Binary message is received
+	// EventMessage Fired when a Text/Binary message is received
 	EventMessage = "message"
-	// More details here:
+	// EventPing More details here:
 	// @url https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_WebSocket_servers#Pings_and_Pongs_The_Heartbeat_of_WebSockets
 	EventPing = "ping"
 	EventPong = "pong"
-	// Fired on disconnection
+	// EventDisconnect Fired on disconnection
 	// The error provided in disconnection event
 	// is defined in RFC 6455, section 11.7.
 	// @url https://github.com/gofiber/websocket/blob/cd4720c435de415b864d975a9ca23a47eaf081ef/websocket.go#L192
 	EventDisconnect = "disconnect"
-	// Fired on first connection
+	// EventConnect Fired on first connection
 	EventConnect = "connect"
-	// Fired when the connection is actively closed from the server
+	// EventClose Fired when the connection is actively closed from the server
 	EventClose = "close"
-	// Fired when some error appears useful also for debugging websockets
+	// EventError Fired when some error appears useful also for debugging websockets
 	EventError = "error"
 )
 
 var (
-	// The addressed ws connection is not available anymore
+	// ErrorInvalidConnection The addressed ws connection is not available anymore
 	// error data is the uuid of that connection
 	ErrorInvalidConnection = errors.New("message cannot be delivered invalid/gone connection")
-	// The UUID already exists in the pool
-	ErrorUUIDDuplication = errors.New("message cannot be delivered invalid/gone connection")
+	// ErrorUUIDDuplication The UUID already exists in the pool
+	ErrorUUIDDuplication = errors.New("UUID already exists in the available connections pool")
+)
+
+var (
+	PongTimeout = 1 * time.Second
+	// RetrySendTimeout retry after 20 ms if there is an error
+	RetrySendTimeout = 20 * time.Millisecond
+	//MaxSendRetry define max retries if there are socket issues
+	MaxSendRetry = 5
+	// ReadTimeout Instead of reading in a for loop, try to avoid full CPU load taking some pause
+	ReadTimeout = 10 * time.Millisecond
 )
 
 // Raw form of websocket message
@@ -66,9 +76,11 @@ type message struct {
 	mType int
 	// Message data
 	data []byte
+	// Message send retries when error
+	retries int
 }
 
-// Event Payload is the object that
+// EventPayload Event Payload is the object that
 // stores all the information about the event and
 // the connection
 type EventPayload struct {
@@ -91,8 +103,11 @@ type EventPayload struct {
 type ws interface {
 	IsAlive() bool
 	GetUUID() string
+	SetUUID(uuid string)
 	SetAttribute(key string, attribute interface{})
 	GetAttribute(key string) interface{}
+	GetIntAttribute(key string) int
+	GetStringAttribute(key string) string
 	EmitToList(uuids []string, message []byte)
 	EmitTo(uuid string, message []byte) error
 	Broadcast(message []byte, except bool)
@@ -274,21 +289,21 @@ func (kws *Websocket) SetUUID(uuid string) {
 	kws.UUID = uuid
 }
 
-// Set a specific attribute for the specific socket connection
+// SetAttribute Set a specific attribute for the specific socket connection
 func (kws *Websocket) SetAttribute(key string, attribute interface{}) {
 	kws.mu.Lock()
 	defer kws.mu.Unlock()
 	kws.attributes[key] = attribute
 }
 
-// Get a specific attribute from the socket attributes
+// GetAttribute Get a specific attribute from the socket attributes
 func (kws *Websocket) GetAttribute(key string) interface{} {
 	kws.mu.RLock()
 	defer kws.mu.RUnlock()
 	return kws.attributes[key]
 }
 
-// Convenience method to retrieve an attribute as an int.
+// GetIntAttribute Convenience method to retrieve an attribute as an int.
 // Will panic if attribute is not an int.
 func (kws *Websocket) GetIntAttribute(key string) int {
 	kws.mu.RLock()
@@ -296,7 +311,7 @@ func (kws *Websocket) GetIntAttribute(key string) int {
 	return kws.attributes[key].(int)
 }
 
-// Convenience method to retrieve an attribute as a string.
+// GetStringAttribute Convenience method to retrieve an attribute as a string.
 // Will panic if attribute is not an int.
 func (kws *Websocket) GetStringAttribute(key string) string {
 	kws.mu.RLock()
@@ -304,7 +319,7 @@ func (kws *Websocket) GetStringAttribute(key string) string {
 	return kws.attributes[key].(string)
 }
 
-// Emit the message to a specific socket uuids list
+// EmitToList Emit the message to a specific socket uuids list
 func (kws *Websocket) EmitToList(uuids []string, message []byte) {
 	for _, uuid := range uuids {
 		err := kws.EmitTo(uuid, message)
@@ -314,7 +329,7 @@ func (kws *Websocket) EmitToList(uuids []string, message []byte) {
 	}
 }
 
-// Emit the message to a specific socket uuids list
+// EmitToList Emit the message to a specific socket uuids list
 // Ignores all errors
 func EmitToList(uuids []string, message []byte) {
 	for _, uuid := range uuids {
@@ -322,23 +337,19 @@ func EmitToList(uuids []string, message []byte) {
 	}
 }
 
-// Emit to a specific socket connection
+// EmitTo Emit to a specific socket connection
 func (kws *Websocket) EmitTo(uuid string, message []byte) error {
 
-	if !pool.contains(uuid) {
+	if !pool.contains(uuid) || !pool.get(uuid).IsAlive() {
 		kws.fireEvent(EventError, []byte(uuid), ErrorInvalidConnection)
 		return ErrorInvalidConnection
 	}
 
-	if !pool.get(uuid).IsAlive() {
-		kws.fireEvent(EventError, []byte(uuid), ErrorInvalidConnection)
-		return ErrorInvalidConnection
-	}
 	pool.get(uuid).Emit(message)
 	return nil
 }
 
-// Emit to a specific socket connection
+// EmitTo Emit to a specific socket connection
 func EmitTo(uuid string, message []byte) error {
 	if !pool.contains(uuid) {
 		return ErrorInvalidConnection
@@ -382,16 +393,15 @@ func Fire(event string, data []byte) {
 	fireGlobalEvent(event, data, nil)
 }
 
-// Emit/Write the message into the given connection
+// Emit Emit/Write the message into the given connection
 func (kws *Websocket) Emit(message []byte) {
 	kws.write(TextMessage, message)
 }
 
-// Actively close the connection from the server
+// Close Actively close the connection from the server
 func (kws *Websocket) Close() {
 	kws.write(CloseMessage, []byte("Connection closed"))
 	kws.fireEvent(EventClose, nil, nil)
-	// don't set alive to false, because this will be done in disconnected
 }
 
 func (kws *Websocket) IsAlive() bool {
@@ -422,7 +432,7 @@ func (kws *Websocket) queueLength() int {
 func (kws *Websocket) pong(ctx context.Context) {
 	for {
 		select {
-		case <-time.Tick(1 * time.Second):
+		case <-time.Tick(PongTimeout):
 			kws.write(PongMessage, []byte{})
 		case <-ctx.Done():
 			return
@@ -433,8 +443,9 @@ func (kws *Websocket) pong(ctx context.Context) {
 // Add in message queue
 func (kws *Websocket) write(messageType int, messageBytes []byte) {
 	kws.queue <- message{
-		mType: messageType,
-		data:  messageBytes,
+		mType:   messageType,
+		data:    messageBytes,
+		retries: 0,
 	}
 }
 
@@ -444,11 +455,14 @@ func (kws *Websocket) send(ctx context.Context) {
 		select {
 		case message := <-kws.queue:
 			if !kws.hasConn() {
-				// retry after 20 ms without blocking the sending thread
-				go func() {
-					time.Sleep(20 * time.Millisecond)
-					kws.queue <- message
-				}()
+				if message.retries <= MaxSendRetry {
+					// retry without blocking the sending thread
+					go func() {
+						time.Sleep(RetrySendTimeout)
+						message.retries = message.retries + 1
+						kws.queue <- message
+					}()
+				}
 				continue
 			}
 
@@ -485,7 +499,7 @@ func (kws *Websocket) run() {
 func (kws *Websocket) read(ctx context.Context) {
 	for {
 		select {
-		case <-time.Tick(10 * time.Millisecond):
+		case <-time.Tick(ReadTimeout):
 			if !kws.hasConn() {
 				continue
 			}
@@ -538,9 +552,6 @@ func (kws *Websocket) disconnected(err error) {
 		kws.fireEvent(EventError, nil, err)
 	}
 
-	// Don't close the websocket connection, because it will
-	// be closed by fiber
-
 	// Remove the socket from the pool
 	pool.delete(kws.UUID)
 }
@@ -556,6 +567,7 @@ func (kws *Websocket) createUUID() string {
 	return uuid
 }
 
+//TODO implement Google UUID library instead of random string
 func (kws *Websocket) randomUUID() string {
 
 	length := 100
@@ -596,7 +608,7 @@ func (kws *Websocket) fireEvent(event string, data []byte, error error) {
 
 type eventCallback func(payload *EventPayload)
 
-// Add listener callback for an event into the listeners list
+// On Add listener callback for an event into the listeners list
 func On(event string, callback eventCallback) {
 	listeners.set(event, callback)
 }

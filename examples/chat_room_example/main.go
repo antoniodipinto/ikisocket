@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// Basic chat message object
+// MessageObject Basic chat message object
 type MessageObject struct {
 	Data string `json:"data"`
 	From string `json:"from"`
@@ -19,7 +19,7 @@ type MessageObject struct {
 	To   string `json:"to"`
 }
 
-// Chat Room message object
+// Room Chat Room message object
 type Room struct {
 	Name  string   `json:"name"`
 	UUID  string   `json:"uuid"`
@@ -178,17 +178,17 @@ func setupSocketListeners() {
 
 	// Multiple event handling supported
 	ikisocket.On(ikisocket.EventConnect, func(ep *ikisocket.EventPayload) {
-		fmt.Println(fmt.Sprintf("Connection event 1 - User: %s", ep.SocketAttributes["user_id"]))
+		fmt.Println(fmt.Sprintf("Connection event 1 - User: %s", ep.Kws.GetStringAttribute("user_id")))
 	})
 
 	ikisocket.On(ikisocket.EventConnect, func(ep *ikisocket.EventPayload) {
-		fmt.Println(fmt.Sprintf("Connection event 2 - User: %s", ep.SocketAttributes["user_id"]))
+		fmt.Println(fmt.Sprintf("Connection event 2 - User: %s", ep.Kws.GetStringAttribute("user_id")))
 	})
 
 	// On message event
 	ikisocket.On(ikisocket.EventMessage, func(ep *ikisocket.EventPayload) {
 
-		fmt.Println(fmt.Sprintf("Message event - User: %s - Message: %s", ep.SocketAttributes["user_id"], string(ep.Data)))
+		fmt.Println(fmt.Sprintf("Message event - User: %s - Message: %s", ep.Kws.GetStringAttribute("user_id"), string(ep.Data)))
 
 		message := MessageObject{}
 
@@ -233,21 +233,21 @@ func setupSocketListeners() {
 	// On disconnect event
 	ikisocket.On(ikisocket.EventDisconnect, func(ep *ikisocket.EventPayload) {
 		// Remove the user from the local clients
-		delete(clients, ep.SocketAttributes["user_id"])
-		fmt.Println(fmt.Sprintf("Disconnection event - User: %s", ep.SocketAttributes["user_id"]))
+		delete(clients, ep.Kws.GetStringAttribute("user_id"))
+		fmt.Println(fmt.Sprintf("Disconnection event - User: %s", ep.Kws.GetStringAttribute("user_id")))
 	})
 
 	// On close event
 	// This event is called when the server disconnects the user actively with .Close() method
 	ikisocket.On(ikisocket.EventClose, func(ep *ikisocket.EventPayload) {
 		// Remove the user from the local clients
-		delete(clients, ep.SocketAttributes["user_id"])
-		fmt.Println(fmt.Sprintf("Close event - User: %s", ep.SocketAttributes["user_id"]))
+		delete(clients, ep.Kws.GetStringAttribute("user_id"))
+		fmt.Println(fmt.Sprintf("Close event - User: %s", ep.Kws.GetStringAttribute("user_id")))
 	})
 
 	// On error event
 	ikisocket.On(ikisocket.EventError, func(ep *ikisocket.EventPayload) {
-		fmt.Println(fmt.Sprintf("Error event - User: %s", ep.SocketAttributes["user_id"]))
+		fmt.Println(fmt.Sprintf("Error event - User: %s", ep.Kws.GetStringAttribute("user_id")))
 	})
 
 }
