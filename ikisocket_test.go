@@ -1,17 +1,21 @@
 package ikisocket
 
 import (
+	"context"
+	"github.com/fasthttp/websocket"
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/websocket/v2"
+	fws "github.com/gofiber/websocket/v2"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"net/http/httptest"
+	"github.com/valyala/fasthttp/fasthttputil"
+	"net"
 	"sync"
 	"testing"
+	"time"
 )
 
 const numTestConn = 10
-const numParallelTestConn = 5000
+const numParallelTestConn = 5_000
 
 type HandlerMock struct {
 	mock.Mock
@@ -34,7 +38,6 @@ type WebsocketMock struct {
 
 func (h *HandlerMock) OnCustomEvent(payload *EventPayload) {
 	h.Called(payload)
-
 	h.wg.Done()
 }
 
@@ -53,22 +56,75 @@ func (s *WebsocketMock) GetUUID() string {
 }
 
 func TestParallelConnections(t *testing.T) {
-	app := fiber.New()
+	pool.reset()
 
+	// create test server
+	cfg := fiber.Config{
+		DisableStartupMessage: true,
+	}
+	app := fiber.New(cfg)
+	ln := fasthttputil.NewInmemoryListener()
+	wg := sync.WaitGroup{}
+
+	defer func() {
+		_ = app.Shutdown()
+		_ = ln.Close()
+	}()
+
+	// attach upgrade middleware
 	app.Use(upgradeMiddleware)
 
-	app.Get("/", New(func(kws *Websocket) {}))
+	// send back response on correct message
+	On(EventMessage, func(payload *EventPayload) {
+		if string(payload.Data) == "test" {
+			payload.Kws.Emit([]byte("response"))
+		}
+	})
 
-	req := httptest.NewRequest(fiber.MethodGet, "/", nil)
-	req.Header.Set("Connection", "Upgrade")
-	req.Header.Set("Upgrade", "Websocket")
-	req.Header.Set("Sec-WebSocket-Key", "veQ+5bJcQAhyLAn+SnM5YA==")
-	req.Header.Set("Sec-WebSocket-Version", "13")
+	// create websocket endpoint
+	app.Get("/", New(func(kws *Websocket) {
+	}))
+
+	// start server
+	go func() {
+		_ = app.Listener(ln)
+	}()
+
+	wsURL := "ws://" + ln.Addr().String()
+
+	// create concurrent connections
 	for i := 0; i < numParallelTestConn; i++ {
-		resp, err := app.Test(req, -1)
-		require.Nil(t, err)
-		require.Equal(t, fiber.StatusSwitchingProtocols, resp.StatusCode)
+		wg.Add(1)
+		go func() {
+			dialer := &websocket.Dialer{
+				NetDial: func(network, addr string) (net.Conn, error) {
+					return ln.Dial()
+				},
+				HandshakeTimeout: 45 * time.Second,
+			}
+			ws, _, err := dialer.Dial(wsURL, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if err := ws.WriteMessage(websocket.TextMessage, []byte("test")); err != nil {
+				t.Fatal(err)
+			}
+
+			tp, m, err := ws.ReadMessage()
+			if err != nil {
+				t.Fatal(err)
+			}
+			require.Equal(t, TextMessage, tp)
+			require.Equal(t, "response", string(m))
+			wg.Done()
+
+			if err := ws.Close(); err != nil {
+				t.Fatal(err)
+			}
+		}()
 	}
+	wg.Wait()
 }
 
 func TestGlobalFire(t *testing.T) {
@@ -102,21 +158,25 @@ func TestGlobalFire(t *testing.T) {
 func TestGlobalBroadcast(t *testing.T) {
 	pool.reset()
 
-	mws := new(WebsocketMock)
-	mws.UUID = "80a80sdf809dsf"
-	pool.set(mws)
+	for i := 0; i < numParallelTestConn; i++ {
+		mws := new(WebsocketMock)
+		mws.UUID = "80a80sdf809dsf"
+		pool.set(mws)
 
-	// setup expectations
-	mws.On("Emit", mock.Anything).Return(nil)
+		// setup expectations
+		mws.On("Emit", mock.Anything).Return(nil)
 
-	mws.wg.Add(1)
+		mws.wg.Add(1)
+	}
 
 	// send global broadcast to all connections
 	Broadcast([]byte("test"))
 
-	mws.wg.Wait()
+	for _, mws := range pool.all() {
+		mws.(*WebsocketMock).wg.Wait()
+		mws.(*WebsocketMock).AssertNumberOfCalls(t, "Emit", 1)
+	}
 
-	mws.AssertNumberOfCalls(t, "Emit", 1)
 }
 
 func TestGlobalEmitTo(t *testing.T) {
@@ -182,6 +242,59 @@ func TestGlobalEmitToList(t *testing.T) {
 	}
 }
 
+func TestWebsocket_GetIntAttribute(t *testing.T) {
+	kws := &Websocket{
+		attributes: make(map[string]interface{}),
+	}
+
+	// get unset attribute
+	assertPanic(t, func() {
+		kws.GetIntAttribute("unknown")
+	})
+
+	// get non-int attribute
+	kws.SetAttribute("notInt", "")
+	assertPanic(t, func() {
+		kws.GetIntAttribute("notInt")
+	})
+
+	// get int attribute
+	kws.SetAttribute("int", 3)
+	v := kws.GetIntAttribute("int")
+	require.Equal(t, 3, v)
+}
+
+func TestWebsocket_GetStringAttribute(t *testing.T) {
+	kws := &Websocket{
+		attributes: make(map[string]interface{}),
+	}
+
+	// get unset attribute
+	assertPanic(t, func() {
+		kws.GetStringAttribute("unknown")
+	})
+
+	// get non-string attribute
+	kws.SetAttribute("notString", 3)
+	assertPanic(t, func() {
+		kws.GetStringAttribute("notString")
+	})
+
+	// get string attribute
+	kws.SetAttribute("str", "3")
+	v := kws.GetStringAttribute("str")
+	require.Equal(t, "3", v)
+}
+
+func assertPanic(t *testing.T, f func()) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Errorf("The code did not panic")
+		}
+	}()
+	f()
+}
+
 func createWS() *Websocket {
 	kws := &Websocket{
 		ws: nil,
@@ -197,8 +310,8 @@ func createWS() *Websocket {
 		Cookies: func(key string, defaultValue ...string) string {
 			return ""
 		},
-		queue:      make(map[string]message),
-		attributes: make(map[string]string),
+		queue:      make(chan message),
+		attributes: make(map[string]interface{}),
 		isAlive:    true,
 	}
 
@@ -210,7 +323,7 @@ func createWS() *Websocket {
 func upgradeMiddleware(c *fiber.Ctx) error {
 	// IsWebSocketUpgrade returns true if the client
 	// requested upgrade to the WebSocket protocol.
-	if websocket.IsWebSocketUpgrade(c) {
+	if fws.IsWebSocketUpgrade(c) {
 		c.Locals("allowed", true)
 		return c.Next()
 	}
@@ -221,11 +334,11 @@ func upgradeMiddleware(c *fiber.Ctx) error {
 // needed but not used
 //
 
-func (s *WebsocketMock) SetAttribute(_ string, _ string) {
+func (s *WebsocketMock) SetAttribute(_ string, _ interface{}) {
 	panic("implement me")
 }
 
-func (s *WebsocketMock) GetAttribute(_ string) string {
+func (s *WebsocketMock) GetAttribute(_ string) interface{} {
 	panic("implement me")
 }
 
@@ -249,7 +362,7 @@ func (s *WebsocketMock) Close() {
 	panic("implement me")
 }
 
-func (s *WebsocketMock) pong() {
+func (s *WebsocketMock) pong(_ context.Context) {
 	panic("implement me")
 }
 
@@ -261,7 +374,7 @@ func (s *WebsocketMock) run() {
 	panic("implement me")
 }
 
-func (s *WebsocketMock) read() {
+func (s *WebsocketMock) read(_ context.Context) {
 	panic("implement me")
 }
 

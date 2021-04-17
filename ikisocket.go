@@ -1,6 +1,7 @@
 package ikisocket
 
 import (
+	"context"
 	"errors"
 	"math/rand"
 	"sync"
@@ -78,7 +79,7 @@ type EventPayload struct {
 	// Unique connection UUID
 	SocketUUID string
 	// Optional websocket attributes
-	SocketAttributes map[string]string
+	SocketAttributes map[string]interface{}
 	// Optional error when are fired events like
 	// - Disconnect
 	// - Error
@@ -90,18 +91,18 @@ type EventPayload struct {
 type ws interface {
 	IsAlive() bool
 	GetUUID() string
-	SetAttribute(key string, attribute string)
-	GetAttribute(key string) string
+	SetAttribute(key string, attribute interface{})
+	GetAttribute(key string) interface{}
 	EmitToList(uuids []string, message []byte)
 	EmitTo(uuid string, message []byte) error
 	Broadcast(message []byte, except bool)
 	Fire(event string, data []byte)
 	Emit(message []byte)
 	Close()
-	pong()
+	pong(ctx context.Context)
 	write(messageType int, messageBytes []byte)
 	run()
-	read()
+	read(ctx context.Context)
 	disconnected(err error)
 	createUUID() string
 	randomUUID() string
@@ -109,15 +110,18 @@ type ws interface {
 }
 
 type Websocket struct {
-	sync.RWMutex
+	mu sync.RWMutex
 	// The Fiber.Websocket connection
 	ws *websocket.Conn
 	// Define if the connection is alive or not
 	isAlive bool
 	// Queue of messages sent from the socket
-	queue map[string]message
+	queue chan message
+	// Channel to signal when this websocket is closed
+	// so go routines will stop gracefully
+	done chan struct{}
 	// Attributes map collection for the connection
-	attributes map[string]string
+	attributes map[string]interface{}
 	// Unique id of the connection
 	UUID string
 	// Wrap Fiber Locals function
@@ -188,23 +192,23 @@ func (p *safePool) reset() {
 
 type safeListeners struct {
 	sync.RWMutex
-	list map[string][]EventCallback
+	list map[string][]eventCallback
 }
 
-func (l *safeListeners) set(event string, callback EventCallback) {
+func (l *safeListeners) set(event string, callback eventCallback) {
 	l.Lock()
 	listeners.list[event] = append(listeners.list[event], callback)
 	l.Unlock()
 }
 
-func (l *safeListeners) get(event string) []EventCallback {
+func (l *safeListeners) get(event string) []eventCallback {
 	l.RLock()
 	defer l.RUnlock()
 	if _, ok := l.list[event]; !ok {
-		return make([]EventCallback, 0)
+		return make([]eventCallback, 0)
 	}
 
-	ret := make([]EventCallback, 0)
+	ret := make([]eventCallback, 0)
 	for _, v := range l.list[event] {
 		ret = append(ret, v)
 	}
@@ -213,12 +217,11 @@ func (l *safeListeners) get(event string) []EventCallback {
 
 // List of the listeners for the events
 var listeners = safeListeners{
-	list: make(map[string][]EventCallback),
+	list: make(map[string][]eventCallback),
 }
 
 func New(callback func(kws *Websocket)) func(*fiber.Ctx) error {
 	return websocket.New(func(c *websocket.Conn) {
-
 		kws := &Websocket{
 			ws: c,
 			Locals: func(key string) interface{} {
@@ -233,8 +236,9 @@ func New(callback func(kws *Websocket)) func(*fiber.Ctx) error {
 			Cookies: func(key string, defaultValue ...string) string {
 				return c.Cookies(key, defaultValue...)
 			},
-			queue:      make(map[string]message),
-			attributes: make(map[string]string),
+			queue:      make(chan message, 100),
+			done:       make(chan struct{}, 1),
+			attributes: make(map[string]interface{}),
 			isAlive:    true,
 		}
 
@@ -255,14 +259,14 @@ func New(callback func(kws *Websocket)) func(*fiber.Ctx) error {
 }
 
 func (kws *Websocket) GetUUID() string {
-	kws.RLock()
-	defer kws.RUnlock()
+	kws.mu.RLock()
+	defer kws.mu.RUnlock()
 	return kws.UUID
 }
 
 func (kws *Websocket) SetUUID(uuid string) {
-	kws.Lock()
-	defer kws.Unlock()
+	kws.mu.Lock()
+	defer kws.mu.Unlock()
 
 	if pool.contains(uuid) {
 		panic(ErrorUUIDDuplication)
@@ -271,17 +275,33 @@ func (kws *Websocket) SetUUID(uuid string) {
 }
 
 // Set a specific attribute for the specific socket connection
-func (kws *Websocket) SetAttribute(key string, attribute string) {
-	kws.Lock()
+func (kws *Websocket) SetAttribute(key string, attribute interface{}) {
+	kws.mu.Lock()
+	defer kws.mu.Unlock()
 	kws.attributes[key] = attribute
-	kws.Unlock()
 }
 
 // Get a specific attribute from the socket attributes
-func (kws *Websocket) GetAttribute(key string) string {
-	kws.RLock()
-	defer kws.RUnlock()
+func (kws *Websocket) GetAttribute(key string) interface{} {
+	kws.mu.RLock()
+	defer kws.mu.RUnlock()
 	return kws.attributes[key]
+}
+
+// Convenience method to retrieve an attribute as an int.
+// Will panic if attribute is not an int.
+func (kws *Websocket) GetIntAttribute(key string) int {
+	kws.mu.RLock()
+	defer kws.mu.RUnlock()
+	return kws.attributes[key].(int)
+}
+
+// Convenience method to retrieve an attribute as a string.
+// Will panic if attribute is not an int.
+func (kws *Websocket) GetStringAttribute(key string) string {
+	kws.mu.RLock()
+	defer kws.mu.RUnlock()
+	return kws.attributes[key].(string)
 }
 
 // Emit the message to a specific socket uuids list
@@ -371,102 +391,146 @@ func (kws *Websocket) Emit(message []byte) {
 func (kws *Websocket) Close() {
 	kws.write(CloseMessage, []byte("Connection closed"))
 	kws.fireEvent(EventClose, nil, nil)
-	kws.isAlive = false
+	// don't set alive to false, because this will be done in disconnected
 }
 
 func (kws *Websocket) IsAlive() bool {
-	kws.RLock()
-	defer kws.RUnlock()
+	kws.mu.RLock()
+	defer kws.mu.RUnlock()
 	return kws.isAlive
 }
 
+func (kws *Websocket) hasConn() bool {
+	kws.mu.RLock()
+	defer kws.mu.RUnlock()
+	return kws.ws.Conn != nil
+}
+
+func (kws *Websocket) setAlive(alive bool) {
+	kws.mu.Lock()
+	defer kws.mu.Unlock()
+	kws.isAlive = alive
+}
+
+func (kws *Websocket) queueLength() int {
+	kws.mu.RLock()
+	defer kws.mu.RUnlock()
+	return len(kws.queue)
+}
+
 // pong writes a control message to the client
-func (kws *Websocket) pong() {
-	for range time.Tick(5 * time.Second) {
-		kws.write(PongMessage, []byte{})
+func (kws *Websocket) pong(ctx context.Context) {
+	for {
+		select {
+		case <-time.Tick(1 * time.Second):
+			kws.write(PongMessage, []byte{})
+		case <-ctx.Done():
+			return
+		}
 	}
 }
 
 // Add in message queue
 func (kws *Websocket) write(messageType int, messageBytes []byte) {
-	kws.Lock()
-	kws.queue[kws.randomUUID()] = message{
+	kws.queue <- message{
 		mType: messageType,
 		data:  messageBytes,
 	}
-	kws.Unlock()
 }
 
-// Start Pong/Read/Write functions
-func (kws *Websocket) run() {
+// Send out message queue
+func (kws *Websocket) send(ctx context.Context) {
+	for {
+		select {
+		case message := <-kws.queue:
+			if !kws.hasConn() {
+				// retry after 20 ms without blocking the sending thread
+				go func() {
+					time.Sleep(20 * time.Millisecond)
+					kws.queue <- message
+				}()
+				continue
+			}
 
-	go kws.pong()
-	go kws.read()
-
-	// every millisecond send messages from the queue
-	for range time.Tick(1 * time.Millisecond) {
-		kws.RLock()
-		if !kws.isAlive {
-			break
-		}
-		if len(kws.queue) == 0 {
-			continue
-		}
-		for uuid, message := range kws.queue {
-
+			kws.mu.RLock()
 			err := kws.ws.WriteMessage(message.mType, message.data)
+			kws.mu.RUnlock()
+
 			if err != nil {
 				kws.disconnected(err)
 			}
-			delete(kws.queue, uuid)
+		case <-ctx.Done():
+			return
 		}
-		kws.RUnlock()
 	}
+}
+
+// Start Pong/Read/Write functions
+//
+// Needs to be blocking, otherwise the connection would close.
+func (kws *Websocket) run() {
+	ctx, cancelFunc := context.WithCancel(context.Background())
+
+	go kws.pong(ctx)
+	go kws.read(ctx)
+	go kws.send(ctx)
+
+	<-kws.done // block until one event is sent to the done channel
+
+	cancelFunc()
 }
 
 // Listen for incoming messages
 // and filter by message type
-func (kws *Websocket) read() {
-	for range time.Tick(10 * time.Millisecond) {
-		if !kws.isAlive {
-			break
-		}
-		kws.RLock()
-		mtype, msg, err := kws.ws.ReadMessage()
-		kws.RUnlock()
+func (kws *Websocket) read(ctx context.Context) {
+	for {
+		select {
+		case <-time.Tick(10 * time.Millisecond):
+			if !kws.hasConn() {
+				continue
+			}
 
-		if mtype == PingMessage {
-			kws.fireEvent(EventPing, nil, nil)
-			continue
-		}
+			kws.mu.RLock()
+			mtype, msg, err := kws.ws.ReadMessage()
+			kws.mu.RUnlock()
 
-		if mtype == PongMessage {
-			kws.fireEvent(EventPong, nil, nil)
-			continue
-		}
+			if mtype == PingMessage {
+				kws.fireEvent(EventPing, nil, nil)
+				continue
+			}
 
-		if mtype == CloseMessage {
-			kws.disconnected(nil)
-			break
-		}
+			if mtype == PongMessage {
+				kws.fireEvent(EventPong, nil, nil)
+				continue
+			}
 
-		if err != nil {
-			kws.disconnected(err)
-			break
-		}
+			if mtype == CloseMessage {
+				kws.disconnected(nil)
+				return
+			}
 
-		// We have a message and we fire the message event
-		kws.fireEvent(EventMessage, msg, nil)
-		continue
+			if err != nil {
+				kws.disconnected(err)
+				return
+			}
+
+			// We have a message and we fire the message event
+			kws.fireEvent(EventMessage, msg, nil)
+		case <-ctx.Done():
+			return
+		}
 	}
 }
 
 // When the connection closes, disconnected method
 func (kws *Websocket) disconnected(err error) {
 	kws.fireEvent(EventDisconnect, nil, err)
-	kws.Lock()
-	kws.isAlive = false
-	kws.Unlock()
+
+	// may be called multiple times from different go routines
+	if kws.IsAlive() {
+		close(kws.done)
+	}
+	kws.setAlive(false)
 
 	// Fire error event if the connection is
 	// disconnected by an error
@@ -474,16 +538,8 @@ func (kws *Websocket) disconnected(err error) {
 		kws.fireEvent(EventError, nil, err)
 	}
 
-	// Close the connection from the server side
-	if kws.ws.Conn != nil {
-		kws.Lock()
-		err = kws.ws.Close()
-		kws.Unlock()
-
-		if err != nil {
-			kws.fireEvent(EventError, nil, err)
-		}
-	}
+	// Don't close the websocket connection, because it will
+	// be closed by fiber
 
 	// Remove the socket from the pool
 	pool.delete(kws.UUID)
@@ -538,9 +594,9 @@ func (kws *Websocket) fireEvent(event string, data []byte, error error) {
 	}
 }
 
-type EventCallback func(payload *EventPayload)
+type eventCallback func(payload *EventPayload)
 
 // Add listener callback for an event into the listeners list
-func On(event string, callback EventCallback) {
+func On(event string, callback eventCallback) {
 	listeners.set(event, callback)
 }
