@@ -300,7 +300,11 @@ func (kws *Websocket) SetAttribute(key string, attribute interface{}) {
 func (kws *Websocket) GetAttribute(key string) interface{} {
 	kws.mu.RLock()
 	defer kws.mu.RUnlock()
-	return kws.attributes[key]
+	value, ok := kws.attributes[key]
+	if ok {
+		return value
+	}
+	return nil
 }
 
 // GetIntAttribute Convenience method to retrieve an attribute as an int.
@@ -308,7 +312,11 @@ func (kws *Websocket) GetAttribute(key string) interface{} {
 func (kws *Websocket) GetIntAttribute(key string) int {
 	kws.mu.RLock()
 	defer kws.mu.RUnlock()
-	return kws.attributes[key].(int)
+	value, ok := kws.attributes[key]
+	if ok {
+		return value.(int)
+	}
+	return 0
 }
 
 // GetStringAttribute Convenience method to retrieve an attribute as a string.
@@ -316,7 +324,11 @@ func (kws *Websocket) GetIntAttribute(key string) int {
 func (kws *Websocket) GetStringAttribute(key string) string {
 	kws.mu.RLock()
 	defer kws.mu.RUnlock()
-	return kws.attributes[key].(string)
+	value, ok := kws.attributes[key]
+	if ok {
+		return value.(string)
+	}
+	return ""
 }
 
 // EmitToList Emit the message to a specific socket uuids list
