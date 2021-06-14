@@ -273,15 +273,11 @@ func TestWebsocket_GetIntAttribute(t *testing.T) {
 	}
 
 	// get unset attribute
-	assertPanic(t, func() {
-		kws.GetIntAttribute("unknown")
-	})
+	// Will return null without panicking
 
 	// get non-int attribute
+	// Will return 0 without panicking
 	kws.SetAttribute("notInt", "")
-	assertPanic(t, func() {
-		kws.GetIntAttribute("notInt")
-	})
 
 	// get int attribute
 	kws.SetAttribute("int", 3)
@@ -295,15 +291,9 @@ func TestWebsocket_GetStringAttribute(t *testing.T) {
 	}
 
 	// get unset attribute
-	assertPanic(t, func() {
-		kws.GetStringAttribute("unknown")
-	})
 
 	// get non-string attribute
 	kws.SetAttribute("notString", 3)
-	assertPanic(t, func() {
-		kws.GetStringAttribute("notString")
-	})
 
 	// get string attribute
 	kws.SetAttribute("str", "3")
