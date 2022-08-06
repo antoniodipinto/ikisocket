@@ -62,7 +62,7 @@ func (h *HandlerMock) OnCustomEvent(payload *EventPayload) {
 	h.wg.Done()
 }
 
-func (s *WebsocketMock) Emit(message []byte) {
+func (s *WebsocketMock) Emit(message []byte, _ int) {
 	s.Called(message)
 	s.wg.Done()
 }
@@ -98,7 +98,7 @@ func TestParallelConnections(t *testing.T) {
 	// send back response on correct message
 	On(EventMessage, func(payload *EventPayload) {
 		if string(payload.Data) == "test" {
-			payload.Kws.Emit([]byte("response"))
+			payload.Kws.Emit([]byte("response"), TextMessage)
 		}
 	})
 
@@ -195,7 +195,7 @@ func TestGlobalBroadcast(t *testing.T) {
 	}
 
 	// send global broadcast to all connections
-	Broadcast([]byte("test"))
+	Broadcast([]byte("test"), TextMessage)
 
 	for _, mws := range pool.all() {
 		mws.(*WebsocketMock).wg.Wait()
@@ -224,16 +224,16 @@ func TestGlobalEmitTo(t *testing.T) {
 	closed.On("IsAlive").Return(false)
 
 	var err error
-	err = EmitTo("non-existent", []byte("error"))
+	err = EmitTo("non-existent", []byte("error"), TextMessage)
 	require.Equal(t, ErrorInvalidConnection, err)
 
-	err = EmitTo(closedUUID, []byte("error"))
+	err = EmitTo(closedUUID, []byte("error"), TextMessage)
 	require.Equal(t, ErrorInvalidConnection, err)
 
 	alive.wg.Add(1)
 
 	// send global broadcast to all connections
-	err = EmitTo(aliveUUID, []byte("test"))
+	err = EmitTo(aliveUUID, []byte("test"), TextMessage)
 	require.Nil(t, err)
 
 	alive.wg.Wait()
@@ -259,7 +259,7 @@ func TestGlobalEmitToList(t *testing.T) {
 	}
 
 	// send global broadcast to all connections
-	EmitToList(uuids, []byte("test"))
+	EmitToList(uuids, []byte("test"), TextMessage)
 
 	for _, kws := range pool.all() {
 		kws.(*WebsocketMock).wg.Wait()
@@ -357,15 +357,15 @@ func (s *WebsocketMock) GetAttribute(_ string) interface{} {
 	panic("implement me")
 }
 
-func (s *WebsocketMock) EmitToList(_ []string, _ []byte) {
+func (s *WebsocketMock) EmitToList(_ []string, _ []byte, _ int) {
 	panic("implement me")
 }
 
-func (s *WebsocketMock) EmitTo(_ string, _ []byte) error {
+func (s *WebsocketMock) EmitTo(_ string, _ []byte, _ int) error {
 	panic("implement me")
 }
 
-func (s *WebsocketMock) Broadcast(_ []byte, _ bool) {
+func (s *WebsocketMock) Broadcast(_ []byte, _ bool, _ int) {
 	panic("implement me")
 }
 
