@@ -108,11 +108,11 @@ type ws interface {
 	GetAttribute(key string) interface{}
 	GetIntAttribute(key string) int
 	GetStringAttribute(key string) string
-	EmitToList(uuids []string, message []byte)
-	EmitTo(uuid string, message []byte) error
-	Broadcast(message []byte, except bool)
+	EmitToList(uuids []string, message []byte, mType ...int)
+	EmitTo(uuid string, message []byte, mType ...int) error
+	Broadcast(message []byte, except bool, mType ...int)
 	Fire(event string, data []byte)
-	Emit(message []byte)
+	Emit(message []byte, mType ...int)
 	Close()
 	pong(ctx context.Context)
 	write(messageType int, messageBytes []byte)
@@ -332,9 +332,9 @@ func (kws *Websocket) GetStringAttribute(key string) string {
 }
 
 // EmitToList Emit the message to a specific socket uuids list
-func (kws *Websocket) EmitToList(uuids []string, message []byte) {
+func (kws *Websocket) EmitToList(uuids []string, message []byte, mType ...int) {
 	for _, uuid := range uuids {
-		err := kws.EmitTo(uuid, message)
+		err := kws.EmitTo(uuid, message, mType...)
 		if err != nil {
 			kws.fireEvent(EventError, message, err)
 		}
@@ -343,26 +343,26 @@ func (kws *Websocket) EmitToList(uuids []string, message []byte) {
 
 // EmitToList Emit the message to a specific socket uuids list
 // Ignores all errors
-func EmitToList(uuids []string, message []byte) {
+func EmitToList(uuids []string, message []byte, mType ...int) {
 	for _, uuid := range uuids {
-		_ = EmitTo(uuid, message)
+		_ = EmitTo(uuid, message, mType...)
 	}
 }
 
 // EmitTo Emit to a specific socket connection
-func (kws *Websocket) EmitTo(uuid string, message []byte) error {
+func (kws *Websocket) EmitTo(uuid string, message []byte, mType ...int) error {
 
 	if !pool.contains(uuid) || !pool.get(uuid).IsAlive() {
 		kws.fireEvent(EventError, []byte(uuid), ErrorInvalidConnection)
 		return ErrorInvalidConnection
 	}
 
-	pool.get(uuid).Emit(message)
+	pool.get(uuid).Emit(message, mType...)
 	return nil
 }
 
 // EmitTo Emit to a specific socket connection
-func EmitTo(uuid string, message []byte) error {
+func EmitTo(uuid string, message []byte, mType ...int) error {
 	if !pool.contains(uuid) {
 		return ErrorInvalidConnection
 	}
@@ -370,18 +370,18 @@ func EmitTo(uuid string, message []byte) error {
 	if !pool.get(uuid).IsAlive() {
 		return ErrorInvalidConnection
 	}
-	pool.get(uuid).Emit(message)
+	pool.get(uuid).Emit(message, mType...)
 	return nil
 }
 
 // Broadcast to all the active connections
 // except avoid broadcasting the message to itself
-func (kws *Websocket) Broadcast(message []byte, except bool) {
+func (kws *Websocket) Broadcast(message []byte, except bool, mType ...int) {
 	for uuid := range pool.all() {
 		if except && kws.UUID == uuid {
 			continue
 		}
-		err := kws.EmitTo(uuid, message)
+		err := kws.EmitTo(uuid, message, mType...)
 		if err != nil {
 			kws.fireEvent(EventError, message, err)
 		}
@@ -389,9 +389,9 @@ func (kws *Websocket) Broadcast(message []byte, except bool) {
 }
 
 // Broadcast to all the active connections
-func Broadcast(message []byte) {
+func Broadcast(message []byte, mType ...int) {
 	for _, kws := range pool.all() {
-		kws.Emit(message)
+		kws.Emit(message, mType...)
 	}
 }
 
@@ -406,8 +406,12 @@ func Fire(event string, data []byte) {
 }
 
 // Emit Emit/Write the message into the given connection
-func (kws *Websocket) Emit(message []byte) {
-	kws.write(TextMessage, message)
+func (kws *Websocket) Emit(message []byte, mType ...int) {
+	t := TextMessage
+	if len(mType) > 0 {
+		t = mType[0]
+	}
+	kws.write(t, message)
 }
 
 // Close Actively close the connection from the server
@@ -445,7 +449,7 @@ func (kws *Websocket) pong(ctx context.Context) {
 	timeoutTicker := time.Tick(PongTimeout)
 	for {
 		select {
-		case <- timeoutTicker:
+		case <-timeoutTicker:
 			kws.write(PongMessage, []byte{})
 		case <-ctx.Done():
 			return
@@ -513,7 +517,7 @@ func (kws *Websocket) read(ctx context.Context) {
 	timeoutTicker := time.Tick(ReadTimeout)
 	for {
 		select {
-		case <- timeoutTicker:
+		case <-timeoutTicker:
 			if !kws.hasConn() {
 				continue
 			}
@@ -581,7 +585,7 @@ func (kws *Websocket) createUUID() string {
 	return uuid
 }
 
-//TODO implement Google UUID library instead of random string
+// TODO implement Google UUID library instead of random string
 func (kws *Websocket) randomUUID() string {
 
 	length := 100
