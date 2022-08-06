@@ -64,7 +64,7 @@ func main() {
 		}
 
 		// Emit the message directly to specified user
-		err = ep.Kws.EmitTo(clients[message.To], ep.Data, ikisocket.TextMessage)
+		err = ep.Kws.EmitTo(clients[message.To], ep.Data)
 		if err != nil {
 			fmt.Println(err)
 		}
@@ -104,9 +104,9 @@ func main() {
 		kws.SetAttribute("user_id", userId)
 
 		//Broadcast to all the connected users the newcomer
-		kws.Broadcast([]byte(fmt.Sprintf("New user connected: %s and UUID: %s", userId, kws.UUID)), true, ikisocket.TextMessage)
+		kws.Broadcast([]byte(fmt.Sprintf("New user connected: %s and UUID: %s", userId, kws.UUID)), true)
 		//Write welcome message
-		kws.Emit([]byte(fmt.Sprintf("Hello user: %s with UUID: %s", userId, kws.UUID)), ikisocket.TextMessage)
+		kws.Emit([]byte(fmt.Sprintf("Hello user: %s with UUID: %s", userId, kws.UUID)))
 	}))
 
 	log.Fatal(app.Listen(":3000"))

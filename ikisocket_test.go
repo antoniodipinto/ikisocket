@@ -62,7 +62,7 @@ func (h *HandlerMock) OnCustomEvent(payload *EventPayload) {
 	h.wg.Done()
 }
 
-func (s *WebsocketMock) Emit(message []byte, _ int) {
+func (s *WebsocketMock) Emit(message []byte, _ ...int) {
 	s.Called(message)
 	s.wg.Done()
 }
@@ -98,7 +98,7 @@ func TestParallelConnections(t *testing.T) {
 	// send back response on correct message
 	On(EventMessage, func(payload *EventPayload) {
 		if string(payload.Data) == "test" {
-			payload.Kws.Emit([]byte("response"), TextMessage)
+			payload.Kws.Emit([]byte("response"))
 		}
 	})
 
@@ -224,16 +224,16 @@ func TestGlobalEmitTo(t *testing.T) {
 	closed.On("IsAlive").Return(false)
 
 	var err error
-	err = EmitTo("non-existent", []byte("error"), TextMessage)
+	err = EmitTo("non-existent", []byte("error"))
 	require.Equal(t, ErrorInvalidConnection, err)
 
-	err = EmitTo(closedUUID, []byte("error"), TextMessage)
+	err = EmitTo(closedUUID, []byte("error"))
 	require.Equal(t, ErrorInvalidConnection, err)
 
 	alive.wg.Add(1)
 
 	// send global broadcast to all connections
-	err = EmitTo(aliveUUID, []byte("test"), TextMessage)
+	err = EmitTo(aliveUUID, []byte("test"))
 	require.Nil(t, err)
 
 	alive.wg.Wait()
@@ -357,15 +357,15 @@ func (s *WebsocketMock) GetAttribute(_ string) interface{} {
 	panic("implement me")
 }
 
-func (s *WebsocketMock) EmitToList(_ []string, _ []byte, _ int) {
+func (s *WebsocketMock) EmitToList(_ []string, _ []byte, _ ...int) {
 	panic("implement me")
 }
 
-func (s *WebsocketMock) EmitTo(_ string, _ []byte, _ int) error {
+func (s *WebsocketMock) EmitTo(_ string, _ []byte, _ ...int) error {
 	panic("implement me")
 }
 
-func (s *WebsocketMock) Broadcast(_ []byte, _ bool, _ int) {
+func (s *WebsocketMock) Broadcast(_ []byte, _ bool, _ ...int) {
 	panic("implement me")
 }
 
