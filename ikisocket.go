@@ -3,12 +3,12 @@ package ikisocket
 import (
 	"context"
 	"errors"
-	"math/rand"
 	"sync"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/websocket/v2"
+	"github.com/google/uuid"
 )
 
 // Source @url:https://github.com/gorilla/websocket/blob/master/conn.go#L61
@@ -363,13 +363,10 @@ func (kws *Websocket) EmitTo(uuid string, message []byte, mType ...int) error {
 
 // EmitTo Emit to a specific socket connection
 func EmitTo(uuid string, message []byte, mType ...int) error {
-	if !pool.contains(uuid) {
+	if !pool.contains(uuid) || !pool.get(uuid).IsAlive() {
 		return ErrorInvalidConnection
 	}
 
-	if !pool.get(uuid).IsAlive() {
-		return ErrorInvalidConnection
-	}
 	pool.get(uuid).Emit(message, mType...)
 	return nil
 }
@@ -585,19 +582,9 @@ func (kws *Websocket) createUUID() string {
 	return uuid
 }
 
-// TODO implement Google UUID library instead of random string
+// Generate random UUID.
 func (kws *Websocket) randomUUID() string {
-
-	length := 100
-	seed := rand.New(rand.NewSource(time.Now().UnixNano()))
-	charset := "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz"
-
-	b := make([]byte, length)
-	for i := range b {
-		b[i] = charset[seed.Intn(len(charset))]
-	}
-
-	return string(b)
+	return uuid.New().String()
 }
 
 // Fires event on all connections.

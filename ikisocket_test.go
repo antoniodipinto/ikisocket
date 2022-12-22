@@ -2,17 +2,18 @@ package ikisocket
 
 import (
 	"context"
-	"github.com/fasthttp/websocket"
-	"github.com/gofiber/fiber/v2"
-	fws "github.com/gofiber/websocket/v2"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
-	"github.com/valyala/fasthttp/fasthttputil"
-	"math/rand"
 	"net"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/fasthttp/websocket"
+	"github.com/gofiber/fiber/v2"
+	fws "github.com/gofiber/websocket/v2"
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+	"github.com/valyala/fasthttp/fasthttputil"
 )
 
 const numTestConn = 10
@@ -402,16 +403,7 @@ func (s *WebsocketMock) createUUID() string {
 }
 
 func (s *WebsocketMock) randomUUID() string {
-	length := 100
-	seed := rand.New(rand.NewSource(time.Now().UnixNano()))
-	charset := "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz"
-
-	b := make([]byte, length)
-	for i := range b {
-		b[i] = charset[seed.Intn(len(charset))]
-	}
-
-	return string(b)
+	return uuid.New().String()
 }
 
 func (s *WebsocketMock) fireEvent(_ string, _ []byte, _ error) {
