@@ -443,10 +443,11 @@ func (kws *Websocket) queueLength() int {
 
 // pong writes a control message to the client
 func (kws *Websocket) pong(ctx context.Context) {
-	timeoutTicker := time.Tick(PongTimeout)
+	timeoutTicker := time.NewTicker(PongTimeout)
+	defer timeoutTicker.Stop()
 	for {
 		select {
-		case <-timeoutTicker:
+		case <-timeoutTicker.C:
 			kws.write(PongMessage, []byte{})
 		case <-ctx.Done():
 			return
@@ -511,10 +512,11 @@ func (kws *Websocket) run() {
 // Listen for incoming messages
 // and filter by message type
 func (kws *Websocket) read(ctx context.Context) {
-	timeoutTicker := time.Tick(ReadTimeout)
+	timeoutTicker := time.NewTicker(ReadTimeout)
+	defer timeoutTicker.Stop()
 	for {
 		select {
-		case <-timeoutTicker:
+		case <-timeoutTicker.C:
 			if !kws.hasConn() {
 				continue
 			}
