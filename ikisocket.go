@@ -169,8 +169,8 @@ func (p *safePool) set(ws ws) {
 func (p *safePool) all() map[string]ws {
 	p.RLock()
 	ret := make(map[string]ws, 0)
-	for uuid, kws := range p.conn {
-		ret[uuid] = kws
+	for wsUUID, kws := range p.conn {
+		ret[wsUUID] = kws
 	}
 	p.RUnlock()
 	return ret
@@ -333,8 +333,8 @@ func (kws *Websocket) GetStringAttribute(key string) string {
 
 // EmitToList Emit the message to a specific socket uuids list
 func (kws *Websocket) EmitToList(uuids []string, message []byte, mType ...int) {
-	for _, uuid := range uuids {
-		err := kws.EmitTo(uuid, message, mType...)
+	for _, wsUUID := range uuids {
+		err := kws.EmitTo(wsUUID, message, mType...)
 		if err != nil {
 			kws.fireEvent(EventError, message, err)
 		}
@@ -344,8 +344,8 @@ func (kws *Websocket) EmitToList(uuids []string, message []byte, mType ...int) {
 // EmitToList Emit the message to a specific socket uuids list
 // Ignores all errors
 func EmitToList(uuids []string, message []byte, mType ...int) {
-	for _, uuid := range uuids {
-		_ = EmitTo(uuid, message, mType...)
+	for _, wsUUID := range uuids {
+		_ = EmitTo(wsUUID, message, mType...)
 	}
 }
 
@@ -374,11 +374,11 @@ func EmitTo(uuid string, message []byte, mType ...int) error {
 // Broadcast to all the active connections
 // except avoid broadcasting the message to itself
 func (kws *Websocket) Broadcast(message []byte, except bool, mType ...int) {
-	for uuid := range pool.all() {
-		if except && kws.UUID == uuid {
+	for wsUUID := range pool.all() {
+		if except && kws.UUID == wsUUID {
 			continue
 		}
-		err := kws.EmitTo(uuid, message, mType...)
+		err := kws.EmitTo(wsUUID, message, mType...)
 		if err != nil {
 			kws.fireEvent(EventError, message, err)
 		}
@@ -402,7 +402,7 @@ func Fire(event string, data []byte) {
 	fireGlobalEvent(event, data, nil)
 }
 
-// Emit Emit/Write the message into the given connection
+// Emit /Write the message into the given connection
 func (kws *Websocket) Emit(message []byte, mType ...int) {
 	t := TextMessage
 	if len(mType) > 0 {
@@ -522,20 +522,20 @@ func (kws *Websocket) read(ctx context.Context) {
 			}
 
 			kws.mu.RLock()
-			mtype, msg, err := kws.ws.ReadMessage()
+			mType, msg, err := kws.ws.ReadMessage()
 			kws.mu.RUnlock()
 
-			if mtype == PingMessage {
+			if mType == PingMessage {
 				kws.fireEvent(EventPing, nil, nil)
 				continue
 			}
 
-			if mtype == PongMessage {
+			if mType == PongMessage {
 				kws.fireEvent(EventPong, nil, nil)
 				continue
 			}
 
-			if mtype == CloseMessage {
+			if mType == CloseMessage {
 				kws.disconnected(nil)
 				return
 			}
@@ -575,13 +575,7 @@ func (kws *Websocket) disconnected(err error) {
 
 // Create random UUID for each connection
 func (kws *Websocket) createUUID() string {
-	uuid := kws.randomUUID()
-
-	//make sure about the uniqueness of the uuid
-	if pool.contains(uuid) {
-		return kws.createUUID()
-	}
-	return uuid
+	return kws.randomUUID()
 }
 
 // Generate random UUID.

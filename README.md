@@ -28,12 +28,12 @@ go get -u github.com/antoniodipinto/ikisocket
 ```go
 // Initialize new ikisocket in the callback this will
 // execute a callback that expects kws *Websocket Object
-New(callback func(kws *Websocket)) func(*fiber.Ctx) error
+func New(callback func(kws *Websocket)) func(*fiber.Ctx) error
 ```
 ---
 ```go
 // Add listener callback for an event into the listeners list
-On(event string, callback func(payload *EventPayload))
+func On(event string, callback func(payload *EventPayload))
 ```
 
 ikisocket public/global functions (many thanks to [Daniel Morawetz](https://github.com/dmorawetz))
@@ -41,25 +41,25 @@ ikisocket public/global functions (many thanks to [Daniel Morawetz](https://gith
 ```go
 // Emit the message to a specific socket uuids list
 // Ignores all errors
-EmitToList(uuids []string, message []byte)
+func EmitToList(uuids []string, message []byte)
 ```
 ---
 
 ```go
 // Emit to a specific socket connection
-EmitTo(uuid string, message []byte) error
+func EmitTo(uuid string, message []byte) error
 ```
 ---
 
 ```go
 // Broadcast to all the active connections
 // except avoid broadcasting the message to itself
-Broadcast(message []byte)
+func Broadcast(message []byte)
 ```
 ---
 ```go
 // Fire custom event on all connections
-Fire(event string, data []byte) 
+func Fire(event string, data []byte) 
 ```
 
 Supported events:
@@ -122,12 +122,6 @@ func (kws *Websocket) SetAttribute(key string, attribute string)
 ```go
 // Get socket connection UUID
 func (kws *Websocket) GetUUID() string
-```
----
-
-```go
-// Set socket connection UUID
-func (kws *Websocket) SetUUID(uuid string)
 ```
 ---
 
