@@ -53,7 +53,7 @@ const (
 )
 
 var (
-	// ErrorInvalidConnection The addressed ws connection is not available anymore
+	// ErrorInvalidConnection The addressed Conn connection is not available anymore
 	// error data is the uuid of that connection
 	ErrorInvalidConnection = errors.New("message cannot be delivered invalid/gone connection")
 	// ErrorUUIDDuplication The UUID already exists in the pool
@@ -127,7 +127,7 @@ type ws interface {
 type Websocket struct {
 	mu sync.RWMutex
 	// The Fiber.Websocket connection
-	ws *websocket.Conn
+	Conn *websocket.Conn
 	// Define if the connection is alive or not
 	isAlive bool
 	// Queue of messages sent from the socket
@@ -238,7 +238,7 @@ var listeners = safeListeners{
 func New(callback func(kws *Websocket)) func(*fiber.Ctx) error {
 	return websocket.New(func(c *websocket.Conn) {
 		kws := &Websocket{
-			ws: c,
+			Conn: c,
 			Locals: func(key string) interface{} {
 				return c.Locals(key)
 			},
@@ -426,7 +426,7 @@ func (kws *Websocket) IsAlive() bool {
 func (kws *Websocket) hasConn() bool {
 	kws.mu.RLock()
 	defer kws.mu.RUnlock()
-	return kws.ws.Conn != nil
+	return kws.Conn.Conn != nil
 }
 
 func (kws *Websocket) setAlive(alive bool) {
@@ -482,7 +482,7 @@ func (kws *Websocket) send(ctx context.Context) {
 			}
 
 			kws.mu.RLock()
-			err := kws.ws.WriteMessage(message.mType, message.data)
+			err := kws.Conn.WriteMessage(message.mType, message.data)
 			kws.mu.RUnlock()
 
 			if err != nil {
@@ -522,7 +522,7 @@ func (kws *Websocket) read(ctx context.Context) {
 			}
 
 			kws.mu.RLock()
-			mType, msg, err := kws.ws.ReadMessage()
+			mType, msg, err := kws.Conn.ReadMessage()
 			kws.mu.RUnlock()
 
 			if mType == PingMessage {

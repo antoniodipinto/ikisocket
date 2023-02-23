@@ -28,7 +28,7 @@ type WebsocketMock struct {
 	mock.Mock
 	mu         sync.RWMutex
 	wg         sync.WaitGroup
-	ws         *websocket.Conn
+	Conn       *websocket.Conn
 	isAlive    bool
 	queue      map[string]message
 	attributes map[string]string
@@ -124,18 +124,18 @@ func TestParallelConnections(t *testing.T) {
 				},
 				HandshakeTimeout: 45 * time.Second,
 			}
-			ws, _, err := dialer.Dial(wsURL, nil)
+			dial, _, err := dialer.Dial(wsURL, nil)
 			if err != nil {
 				t.Error(err)
 				return
 			}
 
-			if err := ws.WriteMessage(websocket.TextMessage, []byte("test")); err != nil {
+			if err := dial.WriteMessage(websocket.TextMessage, []byte("test")); err != nil {
 				t.Error(err)
 				return
 			}
 
-			tp, m, err := ws.ReadMessage()
+			tp, m, err := dial.ReadMessage()
 			if err != nil {
 				t.Error(err)
 				return
@@ -144,7 +144,7 @@ func TestParallelConnections(t *testing.T) {
 			require.Equal(t, "response", string(m))
 			wg.Done()
 
-			if err := ws.Close(); err != nil {
+			if err := dial.Close(); err != nil {
 				t.Error(err)
 				return
 			}
@@ -250,9 +250,9 @@ func TestGlobalEmitToList(t *testing.T) {
 		"las3dfj09808",
 	}
 
-	for _, uuid := range uuids {
+	for _, id := range uuids {
 		kws := new(WebsocketMock)
-		kws.SetUUID(uuid)
+		kws.SetUUID(id)
 		kws.On("Emit", mock.Anything).Return(nil)
 		kws.On("IsAlive").Return(true)
 		kws.wg.Add(1)
@@ -313,7 +313,7 @@ func assertPanic(t *testing.T, f func()) {
 
 func createWS() *Websocket {
 	kws := &Websocket{
-		ws: nil,
+		Conn: nil,
 		Locals: func(key string) interface{} {
 			return ""
 		},
