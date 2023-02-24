@@ -110,6 +110,23 @@ type EventPayload struct {
 ```
 ---
 
+### FastHTTP Websocket connection exposed (Request #31)
+```go
+type Websocket struct {
+    // The FastHTTP connection
+    Conn *websocket.Conn
+}
+```
+Can be accessed from 
+```go 
+kws.Conn
+```
+This will allow direct access to the following FastHTTP functions
+
+![FastHTTP Connection Functions](.github/images/conn_methods.png "FastHTTP Connection functions")
+
+
+---
 
 Socket instance functions
 
