@@ -110,7 +110,7 @@ type EventPayload struct {
 ```
 ---
 
-### FastHTTP Websocket connection exposed (Request #31)
+### FastHTTP Websocket connection exposed [Request #30](https://github.com/antoniodipinto/ikisocket/issues/30)
 ```go
 type Websocket struct {
     // The FastHTTP connection
