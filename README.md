@@ -3,6 +3,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/antoniodipinto/ikisocket)](https://goreportcard.com/report/github.com/antoniodipinto/ikisocket)
 [![GoDoc](https://godoc.org/github.com/antoniodipinto/ikisocket?status.svg)](https://godoc.org/github.com/antoniodipinto/ikisocket)
 [![GitHub license](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/antoniodipinto/ikisocket/blob/master/LICENSE)
+[![Build status](https://github.com/antoniodipinto/ikisocket/actions/workflows/go.yml/badge.svg)](https://github.com/antoniodipinto/ikisocket/)
 ### Based on [Fiber Websocket](https://github.com/gofiber/websocket) and inspired by [Socket.io](https://github.com/socketio/socket.io)
 
 ### Upgrade to Fiber v2 details [here](https://github.com/antoniodipinto/ikisocket/issues/6) 
