@@ -3,10 +3,11 @@ package ikisocket_chat_example
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/antoniodipinto/ikisocket"
-	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/websocket/v2"
 	"log"
+
+	"github.com/antoniodipinto/ikisocket"
+	"github.com/gofiber/contrib/websocket"
+	"github.com/gofiber/fiber/v2"
 )
 
 // MessageObject Basic chat message object

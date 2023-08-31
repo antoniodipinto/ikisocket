@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/fasthttp/websocket"
+	fws "github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
-	fws "github.com/gofiber/websocket/v2"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
