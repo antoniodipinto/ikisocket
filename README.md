@@ -6,7 +6,10 @@
 [![Build status](https://github.com/antoniodipinto/ikisocket/actions/workflows/go.yml/badge.svg)](https://github.com/antoniodipinto/ikisocket/)
 ### Based on [Fiber Websocket](https://github.com/gofiber/websocket) and inspired by [Socket.io](https://github.com/socketio/socket.io)
 
-### Upgrade to Fiber v2 details [here](https://github.com/antoniodipinto/ikisocket/issues/6) 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=antoniodipinto/ikisocket&type=Date)](https://star-history.com/#antoniodipinto/ikisocket&Date)
+
 
 
 ## Any bug?
