@@ -3,6 +3,7 @@ package ikisocket
 import (
 	"context"
 	"net"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -51,11 +52,25 @@ func (s *WebsocketMock) SetUUID(uuid string) {
 }
 
 func (s *WebsocketMock) GetIntAttribute(key string) int {
-	panic("implement me")
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, ok := s.attributes[key]
+	if ok {
+		if intValue, err := strconv.Atoi(value); err == nil {
+			return intValue
+		}
+	}
+	return 0
 }
 
 func (s *WebsocketMock) GetStringAttribute(key string) string {
-	panic("implement me")
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, ok := s.attributes[key]
+	if ok {
+		return value
+	}
+	return ""
 }
 
 func (h *HandlerMock) OnCustomEvent(payload *EventPayload) {
